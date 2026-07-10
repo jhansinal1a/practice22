@@ -1,0 +1,111 @@
+{
+  "stats": {
+    "openPostings": 5,
+    "applicants": 9,
+    "upcomingEvents": 2,
+    "jobsPosted": 24,
+    "eventsScheduled": 8,
+    "employeesHired": 16
+  },
+  "profile": {
+    "name": "Jhansi",
+    "companyName": "Waypoint Hiring Solutions",
+    "role": "Employer / Hiring Manager",
+    "email": "jhansi@waypointhire.com",
+    "phone": "+1 (512) 555-0148",
+    "website": "www.waypointhire.com",
+    "location": "Austin, Texas, USA",
+    "industry": "Technology, Information Services",
+    "companySize": "51–200 employees",
+    "founded": "2019",
+    "timezone": "Central Time (CT)",
+    "about": "Waypoint Hiring Solutions helps organizations connect with qualified talent through smart hiring workflows, local reach, and event-driven engagement.",
+    "hiringFocus": [
+      "Software Engineering",
+      "QA Automation",
+      "Data & AI",
+      "DevOps",
+      "Full Stack",
+      "Event Hiring"
+    ],
+    "workTypes": "Remote, Hybrid, On-site",
+    "preferredLocations": "Austin, TX · Remote (US) · Bangalore, IN",
+    "interviewMode": "Video · In-person · On-site",
+    "hiringVolume": "11–25 hires per quarter",
+    "linkedin": "linkedin.com/company/waypoint-hiring",
+    "twitter": "x.com/waypointhire",
+    "facebook": "facebook.com/waypointhire",
+    "teamMembers": [
+      {
+        "name": "Jhansi",
+        "role": "Employer / Owner",
+        "access": "Owner",
+        "initials": "JH"
+      },
+      {
+        "name": "Ramesh Kumar",
+        "role": "Recruiter",
+        "access": "Admin",
+        "initials": "RK"
+      },
+      {
+        "name": "Sneha Patel",
+        "role": "Talent Sourcer",
+        "access": "Member",
+        "initials": "SP"
+      }
+    ]
+  },
+  "settings": {
+    "emailNotifications": true,
+    "applicantAlerts": true,
+    "eventReminders": true,
+    "weeklySummary": true,
+    "profileVisibility": "Public",
+    "language": "English",
+    "timezone": "Central Time (CT)"
+  },
+  "notifications": [
+    {
+      "id": 1,
+      "title": "New applicant",
+      "message": "A candidate applied for Senior Full Stack Developer.",
+      "read": false,
+      "time": "10 minutes ago"
+    },
+    {
+      "id": 2,
+      "title": "Event reminder",
+      "message": "Austin Tech Hiring Day starts tomorrow at 10:00 AM.",
+      "read": false,
+      "time": "1 hour ago"
+    },
+    {
+      "id": 3,
+      "title": "Profile completed",
+      "message": "Your employer profile is now 100% complete.",
+      "read": true,
+      "time": "Yesterday"
+    }
+  ],
+  "recentActivity": [
+    {
+      "type": "profile",
+      "title": "Profile updated",
+      "detail": "Company information updated",
+      "date": "2026-07-10T14:24:00.000Z"
+    },
+    {
+      "type": "job",
+      "title": "New job posted",
+      "detail": "Senior Full Stack Developer",
+      "date": "2026-07-09T19:45:00.000Z"
+    },
+    {
+      "type": "event",
+      "title": "Event scheduled",
+      "detail": "Austin Tech Hiring Day",
+      "date": "2026-07-08T15:15:00.000Z"
+    }
+  ]
+}

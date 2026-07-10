@@ -1,0 +1,13 @@
+{
+  "name": "waypoint-employer-portal",
+  "version": "1.0.0",
+  "description": "Full-stack Waypoint employer portal for Home, Profile, and Settings",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
