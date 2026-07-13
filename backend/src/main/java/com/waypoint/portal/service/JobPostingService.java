@@ -4,6 +4,8 @@ import com.waypoint.portal.domain.JobPosting;
 import com.waypoint.portal.dto.JobPostingRequest;
 import com.waypoint.portal.dto.JobPostingResponse;
 import com.waypoint.portal.repository.JobPostingRepository;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.stereotype.Service;
@@ -19,6 +21,18 @@ public class JobPostingService {
 
     public List<JobPostingResponse> findForEmployer(String employerId) {
         return jobPostingRepository.findByEmployerIdOrderByCreatedAtDesc(employerId)
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    public List<JobPostingResponse> findForEmployer(String employerId, Integer timePostedDays) {
+        if (timePostedDays == null) {
+            return findForEmployer(employerId);
+        }
+
+        Instant cutoff = Instant.now().minus(Duration.ofDays(timePostedDays));
+        return jobPostingRepository.findByEmployerIdAndCreatedAtGreaterThanEqualOrderByCreatedAtDesc(employerId, cutoff)
                 .stream()
                 .map(this::toResponse)
                 .toList();
@@ -62,7 +76,8 @@ public class JobPostingService {
                 posting.getStatus(),
                 posting.getApplicantCount(),
                 posting.getReviewedCount(),
-                posting.getInterviewingCount()
+                posting.getInterviewingCount(),
+                posting.getCreatedAt()
         );
     }
 }

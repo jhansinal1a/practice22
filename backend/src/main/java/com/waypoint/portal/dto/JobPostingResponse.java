@@ -1,6 +1,7 @@
 package com.waypoint.portal.dto;
 
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.List;
 
 public record JobPostingResponse(
@@ -20,6 +21,7 @@ public record JobPostingResponse(
         String status,
         int applicantCount,
         int reviewedCount,
-        int interviewingCount
+        int interviewingCount,
+        Instant createdAt
 ) {
 }

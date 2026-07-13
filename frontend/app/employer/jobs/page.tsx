@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { applicants } from "../../components/data";
 import { DetailDialog } from "../../components/DetailDialog";
@@ -10,6 +10,15 @@ import { createJobPosting } from "../../lib/api";
 import { useLocalStorageState } from "../../lib/useLocalStorageState";
 
 const STORAGE_KEY = "waypoint.employer.postedJobs";
+
+const TIME_POSTED_FILTERS = [
+  { label: "All Jobs", days: null },
+  { label: "Last 24 hours", days: 1 },
+  { label: "Last 3 days", days: 3 },
+  { label: "Last 7 days", days: 7 },
+  { label: "Last 14 days", days: 14 },
+  { label: "Last 30 days", days: 30 },
+] as const;
 
 type PostedJob = {
   id: string;
@@ -26,7 +35,8 @@ type PostedJob = {
   applicationDeadline?: string;
   resumeRequired: true;
   status: "Published";
-  postedOn: string;
+  createdAt: string;
+  postedOn?: string;
   applicants: number;
   reviewed: number;
   interviewing: number;
@@ -36,20 +46,37 @@ export default function JobsDashboard() {
   const [jobs, setJobs] = useLocalStorageState<PostedJob[]>(STORAGE_KEY, []);
   const [editingJob, setEditingJob] = useState<PostedJob | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [timePostedDays, setTimePostedDays] = useState("all");
   const [detailType, setDetailType] = useState<"posting" | "openings" | "applicants" | null>(null);
   const [selectedResume, setSelectedResume] = useState<(typeof applicants)[number] | null>(null);
-  const selected = jobs[selectedIndex] ?? null;
+  const normalizedJobs = jobs.map(normalizeJob);
+  const filteredJobs = filterJobsByTimePosted(normalizedJobs, timePostedDays);
+  const selected = filteredJobs[selectedIndex] ?? filteredJobs[0] ?? null;
+
+  useEffect(() => {
+    setJobs((current) => {
+      if (current.every((job) => job.createdAt)) {
+        return current;
+      }
+
+      const migratedAt = new Date().toISOString();
+      return current.map((job) => ({
+        ...job,
+        createdAt: job.createdAt || parseLegacyPostedOn(job.postedOn) || migratedAt,
+      }));
+    });
+  }, [setJobs]);
 
   function handleSave(job: PostedJob) {
     setJobs((current) => {
       const existingIndex = current.findIndex((item) => item.id === job.id);
       if (existingIndex === -1) {
         setSelectedIndex(0);
-        return [job, ...current];
+        return [normalizeJob(job), ...current.map(normalizeJob)];
       }
 
-      const next = [...current];
-      next[existingIndex] = job;
+      const next = current.map(normalizeJob);
+      next[existingIndex] = normalizeJob(job);
       setSelectedIndex(existingIndex);
       return next;
     });
@@ -73,14 +100,14 @@ export default function JobsDashboard() {
           <button className="stat-card clickable-card" onClick={() => setDetailType("openings")} type="button">
             <span className="mini-icon">J</span>
             <div>
-              <strong>{jobs.length}</strong>
+              <strong>{normalizedJobs.length}</strong>
               <span>Open postings</span>
             </div>
           </button>
           <button className="stat-card clickable-card" onClick={() => setDetailType("applicants")} type="button">
             <span className="mini-icon">A</span>
             <div>
-              <strong>{jobs.reduce((total, job) => total + job.applicants, 0)}</strong>
+              <strong>{normalizedJobs.reduce((total, job) => total + job.applicants, 0)}</strong>
               <span>New applicants</span>
             </div>
           </button>
@@ -88,14 +115,37 @@ export default function JobsDashboard() {
 
         <div className="jobs-grid">
           <aside className="posting-list" aria-label="Your postings">
-            <h2>Your postings</h2>
-            {jobs.length === 0 ? (
+            <div className="posting-list-header">
+              <h2>Your postings</h2>
+              <label className="compact-filter">
+                <span>Time Posted</span>
+                <select
+                  value={timePostedDays}
+                  onChange={(event) => {
+                    setTimePostedDays(event.target.value);
+                    setSelectedIndex(0);
+                  }}
+                >
+                  {TIME_POSTED_FILTERS.map((filter) => (
+                    <option key={filter.label} value={filter.days?.toString() ?? "all"}>
+                      {filter.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {normalizedJobs.length === 0 ? (
               <div className="empty-state">
                 <strong>No job postings yet</strong>
                 <small>Click New posting to publish your first role.</small>
               </div>
+            ) : filteredJobs.length === 0 ? (
+              <div className="empty-state">
+                <strong>No postings match this filter</strong>
+                <small>Choose All Jobs or a wider time range.</small>
+              </div>
             ) : (
-              jobs.map((job, index) => (
+              filteredJobs.map((job, index) => (
                 <button
                   className={index === selectedIndex ? "posting-item active" : "posting-item"}
                   key={job.id}
@@ -108,7 +158,7 @@ export default function JobsDashboard() {
                   <span className="mini-icon">B</span>
                   <span>
                     <strong>{job.title}</strong>
-                    <small>{job.location} · {job.employmentType}</small>
+                    <small>{job.location} - {job.employmentType} - {formatRelativePostedTime(job.createdAt)}</small>
                   </span>
                 </button>
               ))
@@ -150,7 +200,7 @@ export default function JobsDashboard() {
                 </div>
                 <div>
                   <dt>Posted</dt>
-                  <dd>{selected.postedOn}</dd>
+                  <dd>{formatRelativePostedTime(selected.createdAt)}</dd>
                 </div>
               </dl>
 
@@ -202,7 +252,7 @@ export default function JobsDashboard() {
       {detailType ? (
         <JobDetailDialog
           detailType={detailType}
-          jobs={jobs}
+          jobs={normalizedJobs}
           onClose={() => setDetailType(null)}
           onEdit={(job) => {
             setDetailType(null);
@@ -258,6 +308,7 @@ function JobDetailDialog({
               { label: "Job ID", value: selected.jobId },
               { label: "Work Type", value: selected.workType },
               { label: "Status", value: selected.status },
+              { label: "Posted", value: formatRelativePostedTime(selected.createdAt) },
               { label: "Salary", value: formatSalary(selected) },
               { label: "Required Skills", value: selected.requiredSkills.join(", ") || "Not provided" },
               { label: "Next Action", value: "Edit this posting when role details change" },
@@ -315,7 +366,7 @@ function PostingModal({
 }) {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const isEditingExisting = Boolean(initialJob.postedOn);
+  const isEditingExisting = Boolean(initialJob.createdAt || initialJob.title || initialJob.jobId);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -343,7 +394,7 @@ function PostingModal({
       applicationDeadline: String(form.get("applicationDeadline") ?? "") || undefined,
       resumeRequired: true,
       status: "Published",
-      postedOn: initialJob.postedOn || formatToday(),
+      createdAt: initialJob.createdAt || (isEditingExisting ? "" : new Date().toISOString()),
     };
 
     onSave(job);
@@ -447,7 +498,7 @@ function createEmptyJob(): PostedJob {
     description: "",
     resumeRequired: true,
     status: "Published",
-    postedOn: "",
+    createdAt: "",
     applicants: 0,
     reviewed: 0,
     interviewing: 0,
@@ -462,10 +513,6 @@ function formatSalary(job: PostedJob) {
   return `$${job.salaryMin?.toLocaleString() ?? "0"}-$${job.salaryMax?.toLocaleString() ?? "0"}`;
 }
 
-function formatToday() {
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date());
-}
-
 function parseOptionalNumber(value: FormDataEntryValue | null) {
   const cleaned = String(value ?? "").replace(/[$,]/g, "").trim();
   return cleaned ? Number(cleaned) : undefined;
@@ -477,4 +524,68 @@ function isDevelopmentApiError(caught: unknown) {
   }
 
   return caught.message === "Failed to fetch" || caught.message.includes("401") || caught.message.includes("403");
+}
+
+function normalizeJob(job: PostedJob): PostedJob {
+  return {
+    ...job,
+    createdAt: job.createdAt || parseLegacyPostedOn(job.postedOn) || "",
+  };
+}
+
+function parseLegacyPostedOn(postedOn?: string) {
+  if (!postedOn) {
+    return null;
+  }
+
+  const parsedDate = new Date(`${postedOn}, ${new Date().getFullYear()} 09:00:00`);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return parsedDate.toISOString();
+}
+
+function filterJobsByTimePosted(jobs: PostedJob[], selectedDays: string) {
+  if (selectedDays === "all") {
+    return jobs;
+  }
+
+  const days = Number(selectedDays);
+  if (!Number.isFinite(days)) {
+    return jobs;
+  }
+
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  return jobs.filter((job) => {
+    const postedTime = new Date(job.createdAt).getTime();
+    return Number.isFinite(postedTime) && postedTime >= cutoff;
+  });
+}
+
+function formatRelativePostedTime(createdAt: string) {
+  const postedTime = new Date(createdAt).getTime();
+  if (!Number.isFinite(postedTime)) {
+    return "Time unavailable";
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - postedTime) / 1000));
+  if (elapsedSeconds < 60) {
+    return "just now";
+  }
+
+  if (elapsedSeconds < 3600) {
+    const minutes = Math.floor(elapsedSeconds / 60);
+    return `${minutes} min ago`;
+  }
+
+  const intervals = [
+    { singular: "day", plural: "days", seconds: 86400 },
+    { singular: "hr", plural: "hrs", seconds: 3600 },
+  ];
+  const interval = intervals.find((item) => elapsedSeconds >= item.seconds);
+
+  const value = Math.floor(elapsedSeconds / (interval?.seconds ?? 3600));
+  const unit = value === 1 ? interval?.singular ?? "hr" : interval?.plural ?? "hrs";
+  return `${value} ${unit} ago`;
 }

@@ -35,6 +35,15 @@ export type JobPostingPayload = {
   resumeRequired: boolean;
 };
 
+export type JobPostingResponse = JobPostingPayload & {
+  id: string;
+  status: "Published";
+  applicantCount: number;
+  reviewedCount: number;
+  interviewingCount: number;
+  createdAt: string;
+};
+
 export type AuthResponse = {
   tokenType: "Bearer";
   accessToken: string;
@@ -72,6 +81,13 @@ export async function createJobPosting(payload: JobPostingPayload) {
   return request("/api/employer/jobs", {
     method: "POST",
     body: JSON.stringify(payload),
+    authenticated: true,
+  });
+}
+
+export async function listJobPostings(timePostedDays?: 1 | 3 | 7 | 14 | 30) {
+  const query = timePostedDays ? `?timePostedDays=${timePostedDays}` : "";
+  return request<JobPostingResponse[]>(`/api/employer/jobs${query}`, {
     authenticated: true,
   });
 }

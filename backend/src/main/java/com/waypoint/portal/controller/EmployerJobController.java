@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -25,8 +26,11 @@ public class EmployerJobController {
     }
 
     @GetMapping
-    public List<JobPostingResponse> list(Principal principal) {
-        return jobPostingService.findForEmployer(principal.getName());
+    public List<JobPostingResponse> list(
+            Principal principal,
+            @RequestParam(required = false) Integer timePostedDays
+    ) {
+        return jobPostingService.findForEmployer(principal.getName(), normalizeTimePostedDays(timePostedDays));
     }
 
     @PostMapping
@@ -36,5 +40,16 @@ public class EmployerJobController {
             @Valid @RequestBody JobPostingRequest request
     ) {
         return jobPostingService.create(principal.getName(), request);
+    }
+
+    private Integer normalizeTimePostedDays(Integer timePostedDays) {
+        if (timePostedDays == null) {
+            return null;
+        }
+
+        return switch (timePostedDays) {
+            case 1, 3, 7, 14, 30 -> timePostedDays;
+            default -> null;
+        };
     }
 }

@@ -656,10 +656,42 @@ textarea {
   padding: 18px;
 }
 
+.posting-list-header {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
 .posting-list h2,
 .event-panel h2 {
   font-size: 16px;
   margin-bottom: 14px;
+}
+
+.posting-list-header h2 {
+  margin-bottom: 0;
+}
+
+.compact-filter {
+  display: grid;
+  gap: 6px;
+}
+
+.compact-filter span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.compact-filter select {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font: inherit;
+  min-height: 38px;
+  padding: 0 10px;
 }
 
 .posting-item {
