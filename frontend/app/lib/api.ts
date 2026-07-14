@@ -77,6 +77,15 @@ export async function registerEmployer(payload: EmployerRegistrationPayload) {
   return response;
 }
 
+export async function loginEmployer(workEmail: string, password: string) {
+  const response = await request<AuthResponse>("/api/auth/employer/login", {
+    method: "POST",
+    body: JSON.stringify({ workEmail, password }),
+  });
+  storeToken(response.accessToken);
+  return response;
+}
+
 export async function createJobPosting(payload: JobPostingPayload) {
   return request("/api/employer/jobs", {
     method: "POST",

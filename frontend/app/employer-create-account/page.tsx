@@ -229,7 +229,7 @@ export default function CreateAccountPage() {
               {isSubmitting ? "Creating account..." : "Create employer account"}
             </button>
             <p className="signin-copy">
-              Already have an account? <Link href="/employer/jobs">Sign in</Link>
+              Already have an account? <Link href="/employer-sign-in">Sign in</Link>
             </p>
           </form>
         </section>

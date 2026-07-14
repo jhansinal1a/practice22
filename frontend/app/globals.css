@@ -415,6 +415,84 @@ textarea {
   max-width: none;
 }
 
+.employer-signin-card {
+  grid-template-columns: 380px minmax(0, 1fr);
+  max-width: 900px;
+}
+
+.employer-signin-brand {
+  min-height: 610px;
+}
+
+.employer-signin-brand .signin-eyebrow {
+  color: #b9d3c9;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .07em;
+  margin-top: 70px;
+}
+
+.employer-signin-brand h1 {
+  font-size: 34px;
+  line-height: 1.12;
+  margin-top: 18px;
+  max-width: 290px;
+}
+
+.employer-signin-brand p:last-child {
+  color: #dbe7e2;
+  font-size: 14px;
+  line-height: 1.7;
+  margin-top: 24px;
+  max-width: 290px;
+}
+
+.employer-signin-form {
+  align-self: center;
+  padding: 58px 64px;
+}
+
+.employer-signin-form header h2 {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.employer-signin-form header p {
+  color: var(--muted);
+  line-height: 1.6;
+  margin-top: 8px;
+}
+
+.signin-fields {
+  display: grid;
+  gap: 16px;
+}
+
+.signin-options {
+  align-items: flex-start;
+  color: var(--muted);
+  display: flex;
+  font-size: 11.5px;
+  justify-content: space-between;
+  line-height: 1.5;
+  margin: 14px 0 18px;
+}
+
+.signin-options label {
+  align-items: center;
+  color: var(--ink);
+  display: inline-flex;
+  font-weight: 600;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.signin-options span {
+  max-width: 190px;
+  text-align: right;
+}
+
 .account-reference-form .form-grid {
   gap: 14px 16px;
 }
