@@ -8,7 +8,7 @@
     "employeesHired": 16
   },
   "profile": {
-    "name": "Jhansi",
+    "name": "Jhansi Nalla",
     "companyName": "Waypoint Hiring Solutions",
     "role": "Employer / Hiring Manager",
     "email": "jhansi@waypointhire.com",
@@ -59,7 +59,7 @@
   "settings": {
     "emailNotifications": true,
     "applicantAlerts": true,
-    "eventReminders": true,
+    "eventReminders": false,
     "weeklySummary": true,
     "profileVisibility": "Public",
     "language": "English",
@@ -70,14 +70,14 @@
       "id": 1,
       "title": "New applicant",
       "message": "A candidate applied for Senior Full Stack Developer.",
-      "read": false,
+      "read": true,
       "time": "10 minutes ago"
     },
     {
       "id": 2,
       "title": "Event reminder",
       "message": "Austin Tech Hiring Day starts tomorrow at 10:00 AM.",
-      "read": false,
+      "read": true,
       "time": "1 hour ago"
     },
     {
@@ -89,6 +89,12 @@
     }
   ],
   "recentActivity": [
+    {
+      "type": "profile",
+      "title": "Profile updated",
+      "detail": "Company and employer information updated",
+      "date": "2026-07-13T16:08:48.248Z"
+    },
     {
       "type": "profile",
       "title": "Profile updated",
@@ -106,6 +112,58 @@
       "title": "Event scheduled",
       "detail": "Austin Tech Hiring Day",
       "date": "2026-07-08T15:15:00.000Z"
+    }
+  ],
+  "teamMembers": [
+    {
+      "id": "owner-1",
+      "name": "Jhansi",
+      "email": "jhansi@waypointhire.com",
+      "role": "Employer / Owner",
+      "access": "Owner",
+      "status": "accepted"
+    },
+    {
+      "id": "member-2",
+      "name": "Ramesh Kumar",
+      "email": "ramesh@waypointhire.com",
+      "role": "Recruiter",
+      "access": "Admin",
+      "status": "accepted"
+    },
+    {
+      "id": "member-3",
+      "name": "Sneha Patel",
+      "email": "sneha@waypointhire.com",
+      "role": "Talent Sourcer",
+      "access": "Member",
+      "status": "accepted"
+    }
+  ],
+  "invitations": [
+    {
+      "id": "92049658-052a-44a4-a692-3c863a42e47c",
+      "name": "geetn",
+      "email": "jhansin480@gmail.com",
+      "role": "developer",
+      "access": "Admin",
+      "token": "7c859447379ea87e3247bb44923374f8e028e38bf12582c787ee45fde80d308a",
+      "status": "pending",
+      "createdAt": "2026-07-13T18:51:11.828Z",
+      "expiresAt": "2026-07-20T18:51:11.829Z",
+      "acceptedAt": null
+    },
+    {
+      "id": "7d836c01-9e35-4ba3-9acf-a59cbfc6de09",
+      "name": "g",
+      "email": "geethanjalinalla58@gmail.com",
+      "role": "t",
+      "access": "Member",
+      "token": "ba301e46c0329c1707be6327da78801c19556e5d78fb7c9cce8a0af4f9bb84e3",
+      "status": "pending",
+      "createdAt": "2026-07-13T19:18:40.003Z",
+      "expiresAt": "2026-07-20T19:18:40.004Z",
+      "acceptedAt": null
     }
   ]
 }

@@ -1,0 +1,2746 @@
+﻿================ JOBS PAGE ================
+"use client";
+
+import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
+import { applicants } from "../../components/data";
+import { DetailDialog } from "../../components/DetailDialog";
+import { Field, SelectField, TextAreaField } from "../../components/FormControls";
+import { PortalShell } from "../../components/PortalShell";
+import { createJobPosting } from "../../lib/api";
+import { useLocalStorageState } from "../../lib/useLocalStorageState";
+
+const STORAGE_KEY = "waypoint.employer.postedJobs";
+
+const TIME_POSTED_FILTERS = [
+  { label: "All Jobs", days: null },
+  { label: "Last 24 hours", days: 1 },
+  { label: "Last 3 days", days: 3 },
+  { label: "Last 7 days", days: 7 },
+  { label: "Last 14 days", days: 14 },
+  { label: "Last 30 days", days: 30 },
+] as const;
+
+type PostedJob = {
+  id: string;
+  jobId: string;
+  title: string;
+  workType: string;
+  location: string;
+  employmentType: string;
+  experienceLevel: string;
+  salaryMin?: number;
+  salaryMax?: number;
+  requiredSkills: string[];
+  description: string;
+  applicationDeadline?: string;
+  resumeRequired: true;
+  status: "Published";
+  createdAt: string;
+  postedOn?: string;
+  applicants: number;
+  reviewed: number;
+  interviewing: number;
+};
+
+export default function JobsDashboard() {
+  const [jobs, setJobs] = useLocalStorageState<PostedJob[]>(STORAGE_KEY, []);
+  const [editingJob, setEditingJob] = useState<PostedJob | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [timePostedDays, setTimePostedDays] = useState("all");
+  const [detailType, setDetailType] = useState<"posting" | "openings" | "applicants" | null>(null);
+  const [selectedResume, setSelectedResume] = useState<(typeof applicants)[number] | null>(null);
+  const normalizedJobs = jobs.map(normalizeJob);
+  const filteredJobs = filterJobsByTimePosted(normalizedJobs, timePostedDays);
+  const selected = filteredJobs[selectedIndex] ?? filteredJobs[0] ?? null;
+
+  useEffect(() => {
+    setJobs((current) => {
+      if (current.every((job) => job.createdAt)) {
+        return current;
+      }
+
+      const migratedAt = new Date().toISOString();
+      return current.map((job) => ({
+        ...job,
+        createdAt: job.createdAt || parseLegacyPostedOn(job.postedOn) || migratedAt,
+      }));
+    });
+  }, [setJobs]);
+
+  function handleSave(job: PostedJob) {
+    setJobs((current) => {
+      const existingIndex = current.findIndex((item) => item.id === job.id);
+      if (existingIndex === -1) {
+        setSelectedIndex(0);
+        return [normalizeJob(job), ...current.map(normalizeJob)];
+      }
+
+      const next = current.map(normalizeJob);
+      next[existingIndex] = normalizeJob(job);
+      setSelectedIndex(existingIndex);
+      return next;
+    });
+    setEditingJob(null);
+  }
+
+  return (
+    <PortalShell active="Job Posting">
+      <main className="dashboard-layout">
+        <section className="dashboard-header">
+          <div>
+            <h1>Job Posting Dashboard</h1>
+            <p>Meridian Labs</p>
+          </div>
+          <button className="primary-action compact" onClick={() => setEditingJob(createEmptyJob())} type="button">
+            + New posting
+          </button>
+        </section>
+
+        <section className="stat-grid" aria-label="Posting summary">
+          <button className="stat-card clickable-card" onClick={() => setDetailType("openings")} type="button">
+            <span className="mini-icon">J</span>
+            <div>
+              <strong>{normalizedJobs.length}</strong>
+              <span>Open postings</span>
+            </div>
+          </button>
+          <button className="stat-card clickable-card" onClick={() => setDetailType("applicants")} type="button">
+            <span className="mini-icon">A</span>
+            <div>
+              <strong>{normalizedJobs.reduce((total, job) => total + job.applicants, 0)}</strong>
+              <span>New applicants</span>
+            </div>
+          </button>
+        </section>
+
+        <div className="jobs-grid">
+          <aside className="posting-list" aria-label="Your postings">
+            <div className="posting-list-header">
+              <h2>Your postings</h2>
+              <label className="compact-filter">
+                <span>Time Posted</span>
+                <select
+                  value={timePostedDays}
+                  onChange={(event) => {
+                    setTimePostedDays(event.target.value);
+                    setSelectedIndex(0);
+                  }}
+                >
+                  {TIME_POSTED_FILTERS.map((filter) => (
+                    <option key={filter.label} value={filter.days?.toString() ?? "all"}>
+                      {filter.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {normalizedJobs.length === 0 ? (
+              <div className="empty-state">
+                <strong>No job postings yet</strong>
+                <small>Click New posting to publish your first role.</small>
+              </div>
+            ) : filteredJobs.length === 0 ? (
+              <div className="empty-state">
+                <strong>No postings match this filter</strong>
+                <small>Choose All Jobs or a wider time range.</small>
+              </div>
+            ) : (
+              filteredJobs.map((job, index) => (
+                <button
+                  className={index === selectedIndex ? "posting-item active" : "posting-item"}
+                  key={job.id}
+                  onClick={() => {
+                    setSelectedIndex(index);
+                    setDetailType("posting");
+                  }}
+                  type="button"
+                >
+                  <span className="mini-icon">B</span>
+                  <span>
+                    <strong>{job.title}</strong>
+                    <small>{job.location} - {job.employmentType} - {formatRelativePostedTime(job.createdAt)}</small>
+                  </span>
+                </button>
+              ))
+            )}
+          </aside>
+
+          {selected ? (
+            <section className="job-detail" aria-labelledby="selected-job-title">
+              <header>
+                <div>
+                  <h2 id="selected-job-title">{selected.title}</h2>
+                  <p>{selected.status}</p>
+                </div>
+                <button className="secondary-action" onClick={() => setEditingJob(selected)} type="button">
+                  Edit
+                </button>
+              </header>
+
+              <dl className="job-meta">
+                <div>
+                  <dt>Job ID</dt>
+                  <dd>{selected.jobId}</dd>
+                </div>
+                <div>
+                  <dt>Work type</dt>
+                  <dd>{selected.workType}</dd>
+                </div>
+                <div>
+                  <dt>Location</dt>
+                  <dd>{selected.location}</dd>
+                </div>
+                <div>
+                  <dt>Type</dt>
+                  <dd>{selected.employmentType}</dd>
+                </div>
+                <div>
+                  <dt>Salary</dt>
+                  <dd>{formatSalary(selected)}</dd>
+                </div>
+                <div>
+                  <dt>Posted</dt>
+                  <dd>{formatRelativePostedTime(selected.createdAt)}</dd>
+                </div>
+              </dl>
+
+              <div className="pipeline" aria-label="Applicant pipeline">
+                <span style={{ width: "48%" }}>Applied ({selected.applicants})</span>
+                <span style={{ width: "28%" }}>Reviewed ({selected.reviewed})</span>
+                <span style={{ width: "24%" }}>Interviewing ({selected.interviewing})</span>
+              </div>
+
+              {selected.applicants > 0 ? (
+                <div className="applicant-table">
+                  {applicants.map((applicant) => (
+                    <article className="applicant-row" key={applicant.name}>
+                      <span className="avatar small">{applicant.initials}</span>
+                      <div>
+                        <strong>{applicant.name}</strong>
+                        <small>{applicant.role}</small>
+                      </div>
+                      <button className="resume resume-link" onClick={() => setSelectedResume(applicant)} type="button">
+                        Open resume
+                      </button>
+                      <span className={`status-chip ${applicant.stage.toLowerCase()}`}>{applicant.stage}</span>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state inline">
+                  <strong>No applicants yet</strong>
+                  <small>Applicants will appear here after candidates apply to this posting.</small>
+                </div>
+              )}
+            </section>
+          ) : (
+            <section className="job-detail empty-detail">
+              <h2>No posting selected</h2>
+              <p>Published jobs will appear here after you create them.</p>
+            </section>
+          )}
+        </div>
+      </main>
+
+      {editingJob ? (
+        <PostingModal
+          initialJob={editingJob}
+          onClose={() => setEditingJob(null)}
+          onSave={handleSave}
+        />
+      ) : null}
+      {detailType ? (
+        <JobDetailDialog
+          detailType={detailType}
+          jobs={normalizedJobs}
+          onClose={() => setDetailType(null)}
+          onEdit={(job) => {
+            setDetailType(null);
+            setEditingJob(job);
+          }}
+          selected={selected}
+        />
+      ) : null}
+      {selectedResume ? (
+        <DetailDialog
+          title={`${selectedResume.name} Resume`}
+          subtitle={selectedResume.role}
+          onClose={() => setSelectedResume(null)}
+          items={[
+            { label: "Candidate", value: selectedResume.name },
+            { label: "Resume file", value: `${selectedResume.name.replaceAll(" ", "-").toLowerCase()}-resume.pdf` },
+            { label: "Skills", value: "React, TypeScript, API integration" },
+            { label: "Experience", value: "3+ years relevant experience" },
+            { label: "Status", value: "Resume attached and required" },
+          ]}
+        />
+      ) : null}
+    </PortalShell>
+  );
+}
+
+function JobDetailDialog({
+  detailType,
+  jobs,
+  selected,
+  onClose,
+  onEdit,
+}: {
+  detailType: "posting" | "openings" | "applicants";
+  jobs: PostedJob[];
+  selected: PostedJob | null;
+  onClose: () => void;
+  onEdit: (job: PostedJob) => void;
+}) {
+  if (detailType === "posting" && selected) {
+    return (
+      <div className="modal-backdrop detail-backdrop" role="presentation">
+        <section className="modal-card detail-card" role="dialog" aria-modal="true" aria-labelledby="job-detail-title">
+          <header>
+            <div>
+              <h2 id="job-detail-title">{selected.title}</h2>
+              <p>{selected.location} Â· {selected.employmentType}</p>
+            </div>
+            <button className="ghost-button" onClick={onClose} type="button" aria-label="Close details">x</button>
+          </header>
+          <dl className="detail-list">
+            {[
+              { label: "Job ID", value: selected.jobId },
+              { label: "Work Type", value: selected.workType },
+              { label: "Status", value: selected.status },
+              { label: "Posted", value: formatRelativePostedTime(selected.createdAt) },
+              { label: "Salary", value: formatSalary(selected) },
+              { label: "Required Skills", value: selected.requiredSkills.join(", ") || "Not provided" },
+              { label: "Next Action", value: "Edit this posting when role details change" },
+            ].map((item) => (
+              <div key={item.label}>
+                <dt>{item.label}</dt>
+                <dd>{item.value}</dd>
+              </div>
+            ))}
+          </dl>
+          <footer className="detail-actions">
+            <button className="secondary-action" onClick={() => onEdit(selected)} type="button">Edit posting</button>
+          </footer>
+        </section>
+      </div>
+    );
+  }
+
+  if (detailType === "posting") {
+    return null;
+  }
+
+  const summaries = {
+    openings: {
+      title: "Open postings",
+      subtitle: "Jobs you published",
+      items: [
+        { label: "Published", value: jobs.length },
+        { label: "Most recent", value: jobs[0]?.title ?? "No postings yet" },
+        { label: "Resume required", value: "All postings" },
+      ],
+    },
+    applicants: {
+      title: "New applicants",
+      subtitle: "Candidate activity from your posted jobs",
+      items: [
+        { label: "Total applicants", value: jobs.reduce((total, job) => total + job.applicants, 0) },
+        { label: "Reviewed", value: jobs.reduce((total, job) => total + job.reviewed, 0) },
+        { label: "Interviewing", value: jobs.reduce((total, job) => total + job.interviewing, 0) },
+      ],
+    },
+  }[detailType];
+
+  return <DetailDialog {...summaries} onClose={onClose} />;
+}
+
+function PostingModal({
+  initialJob,
+  onClose,
+  onSave,
+}: {
+  initialJob: PostedJob;
+  onClose: () => void;
+  onSave: (job: PostedJob) => void;
+}) {
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isEditingExisting = Boolean(initialJob.createdAt || initialJob.title || initialJob.jobId);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setIsSubmitting(true);
+
+    const form = new FormData(event.currentTarget);
+    const salaryMin = parseOptionalNumber(form.get("salaryMin"));
+    const salaryMax = parseOptionalNumber(form.get("salaryMax"));
+    const job: PostedJob = {
+      ...initialJob,
+      jobId: String(form.get("jobId") ?? ""),
+      title: String(form.get("title") ?? ""),
+      workType: String(form.get("workType") ?? ""),
+      location: String(form.get("location") ?? ""),
+      employmentType: String(form.get("employmentType") ?? ""),
+      experienceLevel: String(form.get("experienceLevel") ?? ""),
+      salaryMin,
+      salaryMax,
+      requiredSkills: String(form.get("requiredSkills") ?? "")
+        .split(",")
+        .map((skill) => skill.trim())
+        .filter(Boolean),
+      description: String(form.get("description") ?? ""),
+      applicationDeadline: String(form.get("applicationDeadline") ?? "") || undefined,
+      resumeRequired: true,
+      status: "Published",
+      createdAt: initialJob.createdAt || (isEditingExisting ? "" : new Date().toISOString()),
+    };
+
+    onSave(job);
+
+    try {
+      await createJobPosting({
+        jobId: job.jobId,
+        title: job.title,
+        workType: job.workType,
+        location: job.location,
+        employmentType: job.employmentType,
+        experienceLevel: job.experienceLevel,
+        salaryMin: job.salaryMin,
+        salaryMax: job.salaryMax,
+        requiredSkills: job.requiredSkills,
+        description: job.description,
+        applicationDeadline: job.applicationDeadline,
+        resumeRequired: true,
+      });
+    } catch (caught) {
+      if (!isDevelopmentApiError(caught)) {
+        setError(caught instanceof Error ? caught.message : "Unable to sync posting with backend.");
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    setIsSubmitting(false);
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="posting-modal-title">
+        <header>
+          <h2 id="posting-modal-title">{isEditingExisting ? "Edit Posting" : "New Posting"}</h2>
+          <button className="ghost-button" onClick={onClose} type="button" aria-label="Close modal">x</button>
+        </header>
+        <form onSubmit={handleSubmit}>
+          <div className="form-grid">
+            <Field label="Job ID *" name="jobId" placeholder="e.g. JOB-1024" required defaultValue={initialJob.jobId} />
+            <Field label="Job title *" name="title" placeholder="e.g. Senior Frontend Engineer" required defaultValue={initialJob.title} />
+            <SelectField label="Work Type *" name="workType" required defaultValue={initialJob.workType}>
+              <option value="">Select work type</option>
+              <option>Hybrid</option>
+              <option>Onsite</option>
+              <option>Fully Remote</option>
+            </SelectField>
+            <Field label="Location *" name="location" placeholder="e.g. Irving, TX" required defaultValue={initialJob.location} />
+            <SelectField label="Employment type *" name="employmentType" required defaultValue={initialJob.employmentType}>
+              <option>Full-time</option>
+              <option>Part-time</option>
+              <option>Contract</option>
+            </SelectField>
+            <SelectField label="Experience level *" name="experienceLevel" required defaultValue={initialJob.experienceLevel}>
+              <option value="">Select level</option>
+              <option>Entry</option>
+              <option>Mid</option>
+              <option>Senior</option>
+            </SelectField>
+            <Field label="Salary min" name="salaryMin" placeholder="e.g. 80000" defaultValue={initialJob.salaryMin ?? ""} />
+            <Field label="Salary max" name="salaryMax" placeholder="e.g. 120000" defaultValue={initialJob.salaryMax ?? ""} />
+            <Field label="Required skills" name="requiredSkills" placeholder="React, TypeScript, REST APIs" defaultValue={initialJob.requiredSkills.join(", ")} />
+          </div>
+          <TextAreaField
+            label="Description *"
+            name="description"
+            placeholder="Describe the role, responsibilities, and qualifications."
+            required
+            defaultValue={initialJob.description}
+          />
+          <div className="form-grid">
+            <Field label="Application deadline" name="applicationDeadline" type="date" defaultValue={initialJob.applicationDeadline ?? ""} />
+            <div className="required-note">
+              <strong>Resume required</strong>
+              <span>Every applicant must attach a resume before applying.</span>
+            </div>
+          </div>
+          {error ? <p className="form-error" role="alert">{error}</p> : null}
+          <footer className="modal-actions">
+            <button className="ghost-button" onClick={onClose} type="button">Cancel</button>
+            <button className="primary-action compact" disabled={isSubmitting} type="submit">
+              {isSubmitting ? "Saving..." : isEditingExisting ? "Save changes" : "Publish posting"}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function createEmptyJob(): PostedJob {
+  return {
+    id: crypto.randomUUID(),
+    jobId: "",
+    title: "",
+    workType: "",
+    location: "",
+    employmentType: "Full-time",
+    experienceLevel: "",
+    requiredSkills: [],
+    description: "",
+    resumeRequired: true,
+    status: "Published",
+    createdAt: "",
+    applicants: 0,
+    reviewed: 0,
+    interviewing: 0,
+  };
+}
+
+function formatSalary(job: PostedJob) {
+  if (!job.salaryMin && !job.salaryMax) {
+    return "Not provided";
+  }
+
+  return `$${job.salaryMin?.toLocaleString() ?? "0"}-$${job.salaryMax?.toLocaleString() ?? "0"}`;
+}
+
+function parseOptionalNumber(value: FormDataEntryValue | null) {
+  const cleaned = String(value ?? "").replace(/[$,]/g, "").trim();
+  return cleaned ? Number(cleaned) : undefined;
+}
+
+function isDevelopmentApiError(caught: unknown) {
+  if (!(caught instanceof Error)) {
+    return false;
+  }
+
+  return caught.message === "Failed to fetch" || caught.message.includes("401") || caught.message.includes("403");
+}
+
+function normalizeJob(job: PostedJob): PostedJob {
+  return {
+    ...job,
+    createdAt: job.createdAt || parseLegacyPostedOn(job.postedOn) || "",
+  };
+}
+
+function parseLegacyPostedOn(postedOn?: string) {
+  if (!postedOn) {
+    return null;
+  }
+
+  const parsedDate = new Date(`${postedOn}, ${new Date().getFullYear()} 09:00:00`);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return parsedDate.toISOString();
+}
+
+function filterJobsByTimePosted(jobs: PostedJob[], selectedDays: string) {
+  if (selectedDays === "all") {
+    return jobs;
+  }
+
+  const days = Number(selectedDays);
+  if (!Number.isFinite(days)) {
+    return jobs;
+  }
+
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  return jobs.filter((job) => {
+    const postedTime = new Date(job.createdAt).getTime();
+    return Number.isFinite(postedTime) && postedTime >= cutoff;
+  });
+}
+
+function formatRelativePostedTime(createdAt: string) {
+  const postedTime = new Date(createdAt).getTime();
+  if (!Number.isFinite(postedTime)) {
+    return "Time unavailable";
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - postedTime) / 1000));
+  if (elapsedSeconds < 60) {
+    return "just now";
+  }
+
+  if (elapsedSeconds < 3600) {
+    const minutes = Math.floor(elapsedSeconds / 60);
+    return `${minutes} min ago`;
+  }
+
+  const intervals = [
+    { singular: "day", plural: "days", seconds: 86400 },
+    { singular: "hr", plural: "hrs", seconds: 3600 },
+  ];
+  const interval = intervals.find((item) => elapsedSeconds >= item.seconds);
+
+  const value = Math.floor(elapsedSeconds / (interval?.seconds ?? 3600));
+  const unit = value === 1 ? interval?.singular ?? "hr" : interval?.plural ?? "hrs";
+  return `${value} ${unit} ago`;
+}
+
+================ EVENTS PAGE ================
+"use client";
+
+import { useState } from "react";
+import type { FormEvent } from "react";
+import { DetailDialog } from "../../components/DetailDialog";
+import { Field, SelectField, TextAreaField } from "../../components/FormControls";
+import { PortalShell } from "../../components/PortalShell";
+import { useLocalStorageState } from "../../lib/useLocalStorageState";
+import { assessEventWeather } from "../../lib/weatherAssessment";
+import type { WeatherInputs } from "../../lib/weatherAssessment";
+
+const STORAGE_KEY = "waypoint.employer.scheduledEvents";
+
+type ScheduledEvent = {
+  id: string;
+  title: string;
+  eventType: string;
+  eventMode: string;
+  location: string;
+  startsOn: string;
+  endsOn: string;
+  description: string;
+  capacity?: number;
+  durationHours?: number;
+  weather: WeatherInputs;
+  weatherSource?: string;
+  attendees: Attendee[];
+};
+
+type Attendee = {
+  id: string;
+  name: string;
+  email: string;
+  registeredAt: string;
+};
+
+export default function EventsPage() {
+  const [events, setEvents] = useLocalStorageState<ScheduledEvent[]>(STORAGE_KEY, []);
+  const [editingEvent, setEditingEvent] = useState<ScheduledEvent | null>(null);
+  const [detailEvent, setDetailEvent] = useState<ScheduledEvent | null>(null);
+  const [detail, setDetail] = useState<{
+    title: string;
+    subtitle?: string;
+    items: { label: string; value: string | number }[];
+  } | null>(null);
+  const [isAllEventsOpen, setIsAllEventsOpen] = useState(false);
+  const upcomingEvents = events.filter((event) => !isEndedEvent(event));
+
+  function handleSave(event: ScheduledEvent) {
+    setEvents((current) => {
+      const existingIndex = current.findIndex((item) => item.id === event.id);
+      if (existingIndex === -1) {
+        return [normalizeEvent(event), ...current];
+      }
+
+      const next = [...current];
+      next[existingIndex] = normalizeEvent(event);
+      return next;
+    });
+    setEditingEvent(null);
+  }
+
+  function handleRegisterAttendee(eventId: string, attendee: Attendee) {
+    setEvents((current) =>
+      current.map((event) =>
+        event.id === eventId
+          ? { ...normalizeEvent(event), attendees: [...getAttendees(event), attendee] }
+          : normalizeEvent(event),
+      ),
+    );
+    setDetailEvent((current) =>
+      current?.id === eventId
+        ? { ...normalizeEvent(current), attendees: [...getAttendees(current), attendee] }
+        : current,
+    );
+  }
+
+  return (
+    <PortalShell active="Events Scheduling">
+      <main className="events-page">
+        <section className="events-title">
+          <div>
+            <h1>Events</h1>
+            <p>Manage and organize your scheduled hiring events.</p>
+          </div>
+          <button className="primary-action compact" onClick={() => setEditingEvent(createEmptyEvent())} type="button">
+            Schedule Event
+          </button>
+        </section>
+
+        <section className="event-panel" aria-labelledby="upcoming-events-title">
+          <header>
+            <h2 id="upcoming-events-title">Events List</h2>
+            <button
+              className="text-button"
+              onClick={() => setIsAllEventsOpen(true)}
+              type="button"
+            >
+              View All
+            </button>
+          </header>
+
+          {upcomingEvents.length === 0 ? (
+            <div className="empty-state">
+              <strong>No upcoming events</strong>
+              <small>Click Schedule Event to create one, or View All to see ended events.</small>
+            </div>
+          ) : (
+            <div className="event-list">
+              {upcomingEvents.map((event) => (
+                <button
+                  className="event-row clickable-row"
+                  key={event.id}
+                  onClick={() => setDetailEvent(event)}
+                  type="button"
+                >
+                  <span className="mini-icon">E</span>
+                  <div className="event-main">
+                    <strong>{event.title}</strong>
+                    <small>{event.eventType} - {event.eventMode} - {event.location}</small>
+                  </div>
+                <div className="event-date">
+                  <strong>{formatEventDate(event)}</strong>
+                    <small>{getEventStatus(event)} - {getWeatherAssessment(event).score}/100 - {getAttendees(event).length} registered</small>
+                </div>
+                  <span className="chevron">&gt;</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="event-panel" aria-labelledby="management-title">
+          <header>
+            <h2 id="management-title">Event Management</h2>
+          </header>
+          <div className="management-grid">
+            <button
+              className="management-card"
+              onClick={() => setIsAllEventsOpen(true)}
+              type="button"
+            >
+              <span className="mini-icon">A</span>
+              <strong>All Events</strong>
+              <small>View scheduled events</small>
+            </button>
+            <button
+              className="management-card"
+              onClick={() =>
+                setDetail({
+                  title: "Event Insights",
+                  subtitle: "Signals from scheduled events",
+                  items: [
+                    { label: "Scheduled events", value: events.length },
+                    { label: "Average registration", value: events.length ? Math.round(events.reduce((sum, event) => sum + getAttendees(event).length, 0) / events.length) : 0 },
+                    { label: "Largest capacity", value: Math.max(0, ...events.map((event) => event.capacity ?? 0)) },
+                    { label: "Average weather score", value: events.length ? Math.round(events.reduce((sum, event) => sum + getWeatherAssessment(event).score, 0) / events.length) : 0 },
+                  ],
+                })
+              }
+              type="button"
+            >
+              <span className="mini-icon">I</span>
+              <strong>Event Insights</strong>
+              <small>Event analytics</small>
+            </button>
+            <button
+              className="management-card"
+              onClick={() =>
+                setDetail({
+                  title: "Manage Attendees",
+                  subtitle: "Candidate registration workflow",
+                  items: [
+                    { label: "Registered candidates", value: events.reduce((sum, event) => sum + getAttendees(event).length, 0) },
+                    { label: "Total capacity", value: events.reduce((sum, event) => sum + (event.capacity ?? 0), 0) },
+                    { label: "Needs outreach", value: events.length ? "Review attendee lists" : "No events scheduled" },
+                  ],
+                })
+              }
+              type="button"
+            >
+              <span className="mini-icon">M</span>
+              <strong>Manage Attendees</strong>
+              <small>Track registration</small>
+            </button>
+          </div>
+        </section>
+
+        <button
+          className="help-strip clickable-row"
+          onClick={() =>
+            setDetail({
+              title: "Need Help?",
+              subtitle: "Employer support",
+              items: [
+                { label: "Help center", value: "Employer event scheduling guide" },
+                { label: "Support channel", value: "support@waypoint.local" },
+                { label: "Common request", value: "Import attendee lists from events" },
+              ],
+            })
+          }
+          type="button"
+        >
+          <span className="mini-icon">?</span>
+          <div>
+            <strong>Need Help?</strong>
+            <small>Visit our Help Center</small>
+          </div>
+        </button>
+      </main>
+
+      {editingEvent ? (
+        <EventModal
+          initialEvent={editingEvent}
+          onClose={() => setEditingEvent(null)}
+          onSave={handleSave}
+        />
+      ) : null}
+      {detailEvent ? (
+        <EventDetailDialog
+          event={detailEvent}
+          onClose={() => setDetailEvent(null)}
+          onRegister={handleRegisterAttendee}
+          onEdit={() => {
+            setEditingEvent(detailEvent);
+            setDetailEvent(null);
+          }}
+        />
+      ) : null}
+      {isAllEventsOpen ? (
+        <AllEventsDialog
+          events={events}
+          onClose={() => setIsAllEventsOpen(false)}
+          onSelect={(event) => {
+            setDetailEvent(event);
+            setIsAllEventsOpen(false);
+          }}
+        />
+      ) : null}
+      {detail ? <DetailDialog {...detail} onClose={() => setDetail(null)} /> : null}
+    </PortalShell>
+  );
+}
+
+function AllEventsDialog({
+  events,
+  onClose,
+  onSelect,
+}: {
+  events: ScheduledEvent[];
+  onClose: () => void;
+  onSelect: (event: ScheduledEvent) => void;
+}) {
+  return (
+    <div className="modal-backdrop detail-backdrop" role="presentation">
+      <section className="modal-card all-events-card" role="dialog" aria-modal="true" aria-labelledby="all-events-title">
+        <header>
+          <div>
+            <h2 id="all-events-title">All Events</h2>
+            <p>Upcoming and ended events</p>
+          </div>
+          <button className="ghost-button" onClick={onClose} type="button" aria-label="Close all events">x</button>
+        </header>
+        {events.length === 0 ? (
+          <div className="empty-state all-events-empty">
+            <strong>No events scheduled</strong>
+            <small>Schedule an event to see it in this list.</small>
+          </div>
+        ) : (
+          <div className="all-events-list">
+            {events.map((event) => (
+              <button className="all-event-row" key={event.id} onClick={() => onSelect(event)} type="button">
+                <span className={`status-chip ${isEndedEvent(event) ? "reviewed" : "interviewing"}`}>
+                  {getEventStatus(event)}
+                </span>
+                <div>
+                  <strong>{event.title}</strong>
+                  <small>{event.eventType} - {event.eventMode} - {event.location}</small>
+                </div>
+                <span>{getWeatherAssessment(event).score}/100 - {getAttendees(event).length} registered</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function EventDetailDialog({
+  event,
+  onClose,
+  onEdit,
+  onRegister,
+}: {
+  event: ScheduledEvent;
+  onClose: () => void;
+  onEdit: () => void;
+  onRegister: (eventId: string, attendee: Attendee) => void;
+}) {
+  const assessment = getWeatherAssessment(event);
+  const attendees = getAttendees(event);
+
+  function handleRegisterSubmit(registerEvent: FormEvent<HTMLFormElement>) {
+    registerEvent.preventDefault();
+
+    const form = new FormData(registerEvent.currentTarget);
+    const name = String(form.get("attendeeName") ?? "").trim();
+    const email = String(form.get("attendeeEmail") ?? "").trim();
+
+    if (!name || !email) {
+      return;
+    }
+
+    onRegister(event.id, {
+      id: crypto.randomUUID(),
+      name,
+      email,
+      registeredAt: new Date().toLocaleDateString("en-US"),
+    });
+    registerEvent.currentTarget.reset();
+  }
+
+  return (
+    <div className="modal-backdrop detail-backdrop" role="presentation">
+      <section className="modal-card detail-card" role="dialog" aria-modal="true" aria-labelledby="event-detail-title">
+        <header>
+          <div>
+            <h2 id="event-detail-title">{event.title}</h2>
+            <p>{event.eventType} - {event.eventMode} - {event.location}</p>
+          </div>
+          <button className="ghost-button" onClick={onClose} type="button" aria-label="Close details">x</button>
+        </header>
+        <dl className="detail-list">
+          {[
+            { label: "Starts", value: event.startsOn },
+            { label: "Ends", value: event.endsOn || event.startsOn },
+            { label: "Status", value: getEventStatus(event) },
+            { label: "Event Mode", value: event.eventMode },
+            { label: "Suitability", value: `${assessment.score}/100 - ${assessment.status}` },
+            { label: "Capacity", value: event.capacity ?? "Not provided" },
+              { label: "Duration", value: event.durationHours ? `${event.durationHours} hours` : "Not provided" },
+            { label: "Weather Source", value: event.weatherSource ?? "Google weather not fetched" },
+            { label: "Registered", value: attendees.length },
+            { label: "Description", value: event.description || "Not provided" },
+          ].map((item) => (
+            <div key={item.label}>
+              <dt>{item.label}</dt>
+              <dd>{item.value}</dd>
+            </div>
+          ))}
+        </dl>
+        <section className="weather-panel" aria-label="Weather recommendation">
+          <header>
+            <h3>Weather Recommendation</h3>
+            <span className={`weather-badge ${getWeatherBadgeClass(assessment.status)}`}>{assessment.status}</span>
+          </header>
+          <div className="weather-score">
+            <strong>{assessment.score}</strong>
+            <span>Event suitability score</span>
+          </div>
+          <div className="weather-columns">
+            <div>
+              <h4>Reasoning</h4>
+              <ul>
+                {assessment.reasons.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <h4>Precautions</h4>
+              <ul>
+                {assessment.precautions.map((precaution) => (
+                  <li key={precaution}>{precaution}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+        <section className="attendee-panel" aria-label="Registered attendees">
+          <header>
+            <h3>Registered attendees</h3>
+            <span className="attendee-count">{attendees.length}</span>
+          </header>
+          <form className="attendee-form" onSubmit={handleRegisterSubmit}>
+            <input name="attendeeName" placeholder="Attendee name" required />
+            <input name="attendeeEmail" placeholder="Email address" required type="email" />
+            <button className="secondary-action" type="submit">Register</button>
+          </form>
+          {attendees.length === 0 ? (
+            <p className="attendee-empty">No attendees registered yet.</p>
+          ) : (
+            <div className="attendee-list">
+              {attendees.map((attendee) => (
+                <div className="attendee-row" key={attendee.id}>
+                  <div>
+                    <strong>{attendee.name}</strong>
+                    <small>{attendee.email}</small>
+                  </div>
+                  <span>{attendee.registeredAt}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+        <footer className="detail-actions">
+          <button className="secondary-action" onClick={onEdit} type="button">Edit event</button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function EventModal({
+  initialEvent,
+  onClose,
+  onSave,
+}: {
+  initialEvent: ScheduledEvent;
+  onClose: () => void;
+  onSave: (event: ScheduledEvent) => void;
+}) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const isEditingExisting = Boolean(initialEvent.startsOn);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setIsSubmitting(true);
+
+    const form = new FormData(event.currentTarget);
+    const location = String(form.get("location") ?? "").trim();
+    const requiredFields = [
+      ["Event title", String(form.get("title") ?? "")],
+      ["Event type", String(form.get("eventType") ?? "")],
+      ["Event mode", String(form.get("eventMode") ?? "")],
+      ["Location", location],
+      ["Start date", String(form.get("startsOn") ?? "")],
+    ];
+    const missingField = requiredFields.find(([, value]) => !value.trim());
+
+    if (missingField) {
+      setError(`${missingField[0]} is required.`);
+      setIsSubmitting(false);
+      return;
+    }
+
+    const weatherLookup = await fetchGoogleWeatherForEvent(location);
+
+    onSave({
+      ...initialEvent,
+      title: String(form.get("title") ?? "").trim(),
+      eventType: String(form.get("eventType") ?? "").trim(),
+      eventMode: String(form.get("eventMode") ?? "").trim(),
+      location,
+      startsOn: String(form.get("startsOn") ?? ""),
+      endsOn: String(form.get("endsOn") ?? ""),
+      capacity: parseOptionalNumber(form.get("capacity")),
+      durationHours: parseOptionalNumber(form.get("durationHours")),
+      description: String(form.get("description") ?? ""),
+      weather: weatherLookup.weather,
+      weatherSource: weatherLookup.source,
+      attendees: getAttendees(initialEvent),
+    });
+
+    if (weatherLookup.error) {
+      setError(weatherLookup.error);
+    }
+
+    setIsSubmitting(false);
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="event-modal-title">
+        <header>
+          <h2 id="event-modal-title">{isEditingExisting ? "Edit Event" : "Schedule Event"}</h2>
+          <button className="ghost-button" onClick={onClose} type="button" aria-label="Close modal">x</button>
+        </header>
+        <form onSubmit={handleSubmit}>
+          <div className="form-grid">
+            <Field label="Event title *" name="title" placeholder="e.g. Tech Career Fair" required defaultValue={initialEvent.title} />
+            <SelectField label="Event type *" name="eventType" required defaultValue={initialEvent.eventType}>
+              <option value="">Select event type</option>
+              <option>Career Fair</option>
+              <option>Info Session</option>
+              <option>Recruitment Drive</option>
+              <option>Networking Event</option>
+            </SelectField>
+            <SelectField label="Event Mode *" name="eventMode" required defaultValue={initialEvent.eventMode}>
+              <option value="">Select event mode</option>
+              <option>In person</option>
+              <option>Virtual</option>
+            </SelectField>
+            <Field label="Location *" name="location" placeholder="e.g. Irving Campus" required defaultValue={initialEvent.location} />
+            <Field label="Capacity" name="capacity" placeholder="e.g. 100" defaultValue={initialEvent.capacity ?? ""} />
+            <Field label="Duration hours" name="durationHours" placeholder="e.g. 4" defaultValue={initialEvent.durationHours ?? ""} />
+            <Field label="Start date *" name="startsOn" type="date" required defaultValue={initialEvent.startsOn} />
+            <Field label="End date" name="endsOn" type="date" defaultValue={initialEvent.endsOn} />
+          </div>
+          <TextAreaField
+            label="Description"
+            name="description"
+            placeholder="Describe the event purpose, audience, and agenda."
+            defaultValue={initialEvent.description}
+          />
+          <div className="weather-autofetch-note">
+            <strong>Google weather will be fetched automatically</strong>
+            <span>Weather and AQI are pulled from Google using the event location when you save.</span>
+          </div>
+          {error ? <p className="form-error" role="alert">{error}</p> : null}
+          <footer className="modal-actions">
+            <button className="ghost-button" onClick={onClose} type="button">Cancel</button>
+            <button className="primary-action compact" disabled={isSubmitting} type="submit">
+              {isSubmitting ? "Saving..." : isEditingExisting ? "Save changes" : "Schedule event"}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function createEmptyEvent(): ScheduledEvent {
+  return {
+    id: crypto.randomUUID(),
+    title: "",
+    eventType: "",
+    eventMode: "",
+    location: "",
+    startsOn: "",
+    endsOn: "",
+    description: "",
+    durationHours: undefined,
+    weather: {},
+    weatherSource: undefined,
+    attendees: [],
+  };
+}
+
+function formatEventDate(event: ScheduledEvent) {
+  if (!event.endsOn || event.endsOn === event.startsOn) {
+    return event.startsOn;
+  }
+
+  return `${event.startsOn} - ${event.endsOn}`;
+}
+
+function getEventStatus(event: ScheduledEvent) {
+  return isEndedEvent(event) ? "Ended" : "Upcoming";
+}
+
+function isEndedEvent(event: ScheduledEvent) {
+  const eventEndDate = event.endsOn || event.startsOn;
+  if (!eventEndDate) {
+    return false;
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return new Date(`${eventEndDate}T00:00:00`) < today;
+}
+
+function parseOptionalNumber(value: FormDataEntryValue | null) {
+  const cleaned = String(value ?? "").replace(/[$,]/g, "").trim();
+  return cleaned ? Number(cleaned) : undefined;
+}
+
+function getWeatherAssessment(event: ScheduledEvent) {
+  return assessEventWeather(event.weather ?? {}, {
+    eventType: event.eventType,
+    eventMode: event.eventMode,
+    capacity: event.capacity,
+    durationHours: event.durationHours,
+  });
+}
+
+async function fetchGoogleWeatherForEvent(location: string): Promise<{
+  weather: WeatherInputs;
+  source?: string;
+  error?: string;
+}> {
+  try {
+    const response = await fetch("/api/google-weather", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ location }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      return {
+        weather: {},
+        source: "Google weather unavailable",
+        error: error?.message ?? "Unable to fetch Google weather. Configure GOOGLE_MAPS_API_KEY and try again.",
+      };
+    }
+
+    const data = (await response.json()) as { weather: WeatherInputs; source: string };
+    return {
+      weather: data.weather,
+      source: data.source,
+    };
+  } catch {
+    return {
+      weather: {},
+      source: "Google weather unavailable",
+      error: "Unable to reach Google weather service from the local app.",
+    };
+  }
+}
+
+function getWeatherBadgeClass(status: ReturnType<typeof getWeatherAssessment>["status"]) {
+  if (status === "Cancel") return "cancel";
+  if (status === "Move Indoors/Postpone") return "move";
+  if (status === "Host with Precautions") return "caution";
+  return "safe";
+}
+
+function normalizeEvent(event: ScheduledEvent): ScheduledEvent {
+  return {
+    ...event,
+    weather: event.weather ?? {},
+    attendees: getAttendees(event),
+  };
+}
+
+function getAttendees(event: Partial<ScheduledEvent>): Attendee[] {
+  return Array.isArray(event.attendees) ? event.attendees : [];
+}
+
+================ HOME PAGE ================
+import { PortalShell } from "../../components/PortalShell";
+
+export default function EmployerHomePage() {
+  return (
+    <PortalShell active="Home">
+      <main className="dashboard-layout">
+        <section className="not-found-panel" aria-labelledby="home-not-found-title">
+          <p className="eyebrow">Merged from another team</p>
+          <h1 id="home-not-found-title">Page not found</h1>
+          <p>
+            The Home page is not available in this employer portal build. Use
+            Job Posting or Events Scheduling from the menu.
+          </p>
+        </section>
+      </main>
+    </PortalShell>
+  );
+}
+
+================ PORTAL SHELL ================
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
+
+const navItems = [
+  { href: "/employer/home", label: "Home", icon: "H" },
+  { href: "/employer/jobs", label: "Job Posting", icon: "J" },
+  { href: "/employer/events", label: "Events Scheduling", icon: "E" },
+];
+
+export function Logo() {
+  return (
+    <Link className="logo" href="/employer/jobs" aria-label="Waypoint job postings">
+      <span className="logo-mark" />
+      <span>Waypoint</span>
+    </Link>
+  );
+}
+
+export function PortalHeader({ active }: { active: string }) {
+  return (
+    <header className="portal-header">
+      <Logo />
+      <nav className="portal-nav" aria-label="Employer navigation">
+        {navItems.map((item) => (
+          <Link
+            className={active === item.label ? "nav-link active" : "nav-link"}
+            href={item.href}
+            key={item.href}
+          >
+            <span aria-hidden="true">{item.icon}</span>
+            {item.label}
+          </Link>
+        ))}
+      </nav>
+      <div className="account-menu">
+        <NotificationMenu />
+      </div>
+    </header>
+  );
+}
+
+function NotificationMenu() {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="profile-menu">
+      <button
+        className="bell icon-button profile-trigger"
+        type="button"
+        aria-label="Open notifications menu"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((current) => !current)}
+      >
+        N
+      </button>
+      {isOpen ? (
+        <div className="profile-dropdown" role="menu">
+          <button type="button" role="menuitem">Profile</button>
+          <button type="button" role="menuitem">Settings</button>
+          <button type="button" role="menuitem">Logout</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function PortalShell({
+  active,
+  children,
+}: Readonly<{ active: string; children: React.ReactNode }>) {
+  return (
+    <div className="portal-page">
+      <PortalHeader active={active} />
+      {children}
+    </div>
+  );
+}
+
+================ GLOBAL CSS ================
+@import "tailwindcss";
+
+:root {
+  --ink: #11191a;
+  --muted: #68716d;
+  --line: #e3dfd8;
+  --paper: #fffdfa;
+  --canvas: #f4eee8;
+  --deep: #121a1d;
+  --green: #075e43;
+  --green-soft: #e8f4ee;
+  --sand: #f7f2ed;
+  --shadow: 0 20px 50px rgb(20 20 20 / 12%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-inter), Arial, sans-serif;
+  font-size: 14px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+.logo {
+  align-items: center;
+  display: inline-flex;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 18px;
+  font-weight: 700;
+  gap: 8px;
+}
+
+.logo-mark {
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  display: inline-block;
+  height: 16px;
+  position: relative;
+  width: 16px;
+}
+
+.logo-mark::after {
+  background: currentColor;
+  border-radius: 999px;
+  content: "";
+  height: 5px;
+  left: 4px;
+  position: absolute;
+  top: 4px;
+  width: 5px;
+}
+
+.signup-wrap {
+  min-height: 100vh;
+  padding: 38px;
+}
+
+.signup-card {
+  background: var(--paper);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: grid;
+  grid-template-columns: 310px minmax(0, 1fr);
+  margin: 0 auto;
+  max-width: 1050px;
+  overflow: hidden;
+}
+
+.brand-panel {
+  background:
+    radial-gradient(circle at 90% 95%, transparent 0 38px, rgb(255 255 255 / 8%) 39px 40px, transparent 41px),
+    var(--deep);
+  color: white;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 720px;
+  padding: 38px;
+}
+
+.brand-panel h1,
+.hero-band h1 {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: clamp(36px, 4vw, 52px);
+  font-weight: 600;
+  line-height: 0.94;
+  max-width: 590px;
+}
+
+.brand-panel p,
+.hero-band p {
+  color: rgb(255 255 255 / 72%);
+  line-height: 1.7;
+  margin-top: 24px;
+  max-width: 440px;
+}
+
+.proof-list {
+  display: grid;
+  gap: 18px;
+  margin: 36px 0 0;
+}
+
+.proof-list div {
+  display: grid;
+  gap: 3px;
+}
+
+.proof-list dt {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.proof-list dd {
+  color: rgb(255 255 255 / 58%);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.account-form {
+  padding: 42px 48px 34px;
+}
+
+.account-form header p,
+.helper-copy,
+.portal-header,
+.dashboard-header p,
+.events-title p,
+small {
+  color: var(--muted);
+}
+
+.account-form h2,
+.dashboard-header h1,
+.events-title h1 {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 31px;
+  line-height: 1;
+}
+
+.role-toggle {
+  background: var(--sand);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 22px 0 24px;
+  padding: 3px;
+}
+
+.role-toggle button {
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  color: var(--muted);
+  padding: 8px;
+}
+
+.role-toggle .active {
+  background: white;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+fieldset {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 18px 0 0;
+  padding: 16px 0 0;
+}
+
+.weather-fieldset {
+  margin-top: 18px;
+}
+
+.weather-autofetch-note {
+  background: var(--green-soft);
+  border: 1px solid rgb(7 94 67 / 22%);
+  border-radius: 6px;
+  display: grid;
+  gap: 4px;
+  margin-top: 16px;
+  padding: 12px;
+}
+
+.weather-autofetch-note strong {
+  color: var(--green);
+}
+
+.weather-autofetch-note span {
+  color: var(--muted);
+}
+
+legend {
+  color: var(--ink);
+  font-weight: 700;
+  padding-right: 14px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 12px 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.address-grid {
+  grid-template-columns: 110px 1fr 180px;
+}
+
+.field {
+  display: grid;
+  gap: 5px;
+}
+
+.field span {
+  color: #4d5552;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+input,
+select,
+textarea {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  min-height: 34px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.textarea-field {
+  grid-column: 1 / -1;
+}
+
+.helper-copy {
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pill-option input {
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.pill-option span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  padding: 7px 16px;
+}
+
+.pill-option input:checked + span {
+  background: var(--green-soft);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.primary-action {
+  background: var(--green);
+  border: 0;
+  border-radius: 4px;
+  color: white;
+  font-weight: 800;
+  min-height: 36px;
+  padding: 0 18px;
+  width: 100%;
+}
+
+.primary-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.primary-action.compact {
+  min-height: 34px;
+  width: auto;
+}
+
+.secondary-action {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--green);
+  font-weight: 800;
+  min-height: 34px;
+  padding: 0 14px;
+}
+
+.secondary-action:hover {
+  background: var(--green-soft);
+  border-color: rgb(7 94 67 / 32%);
+}
+
+.form-error {
+  background: #fff0ed;
+  border: 1px solid #f0b3a8;
+  border-radius: 4px;
+  color: #9b2c1f;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 14px 0;
+  padding: 10px 12px;
+}
+
+.signin-copy {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 12px;
+  text-align: center;
+}
+
+.signin-copy a {
+  color: var(--green);
+  font-weight: 800;
+}
+
+.portal-page {
+  background: var(--canvas);
+  min-height: 100vh;
+}
+
+.portal-header {
+  align-items: center;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 180px 1fr auto;
+  min-height: 64px;
+  padding: 0 clamp(20px, 6vw, 72px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.portal-nav {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.nav-link {
+  align-items: center;
+  border-bottom: 2px solid transparent;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+.nav-link span,
+.mini-icon,
+.bell {
+  align-items: center;
+  background: var(--sand);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+
+.icon-button {
+  color: var(--ink);
+  padding: 0;
+}
+
+.nav-link.active {
+  border-color: var(--green);
+  color: var(--green);
+  font-weight: 800;
+}
+
+.account-menu {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.profile-menu {
+  position: relative;
+}
+
+.avatar.profile-trigger {
+  border: 0;
+}
+
+.profile-dropdown {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 14px 34px rgb(20 20 20 / 12%);
+  display: grid;
+  min-width: 150px;
+  padding: 6px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 30;
+}
+
+.profile-dropdown button {
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--ink);
+  font-weight: 700;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.profile-dropdown button:hover {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.avatar {
+  align-items: center;
+  background: var(--green);
+  border-radius: 999px;
+  color: white;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.avatar.small {
+  height: 30px;
+  width: 30px;
+}
+
+.company-name {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.hero-band {
+  background:
+    radial-gradient(circle at 92% 0, transparent 0 88px, rgb(255 255 255 / 5%) 89px 90px, transparent 91px),
+    var(--deep);
+  color: white;
+  margin: 0 auto;
+  max-width: 1110px;
+  min-height: 330px;
+  padding: 54px 46px 42px;
+}
+
+.eyebrow {
+  color: inherit;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  margin-bottom: 18px;
+  text-transform: uppercase;
+}
+
+.metric-row {
+  border-top: 1px solid rgb(255 255 255 / 10%);
+  display: flex;
+  gap: 70px;
+  margin-top: 38px;
+  max-width: 620px;
+  padding-top: 24px;
+}
+
+.metric-row div {
+  display: grid;
+  gap: 4px;
+}
+
+.metric-button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  text-align: left;
+}
+
+.metric-row strong {
+  font-size: 20px;
+}
+
+.metric-row span {
+  color: rgb(255 255 255 / 58%);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.content-band {
+  margin: 0 auto;
+  max-width: 1110px;
+  padding: 42px 48px;
+}
+
+.about-section h2 {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 28px;
+  line-height: 1.1;
+  max-width: 860px;
+}
+
+.about-section p {
+  line-height: 1.75;
+  margin-top: 18px;
+  max-width: 960px;
+}
+
+.insight-card,
+.stat-card,
+.event-panel,
+.help-strip,
+.job-detail,
+.posting-list {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.insight-card {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  margin-top: 22px;
+  padding: 18px;
+  text-align: left;
+  width: 100%;
+}
+
+.dashboard-layout,
+.events-page {
+  margin: 0 auto;
+  max-width: 1110px;
+  padding: 32px clamp(18px, 4vw, 42px) 54px;
+}
+
+.dashboard-header,
+.events-title,
+.event-panel header,
+.job-detail header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.stat-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 22px 0;
+}
+
+.stat-card {
+  align-items: center;
+  color: inherit;
+  display: flex;
+  gap: 14px;
+  padding: 18px;
+  text-align: left;
+}
+
+.clickable-card,
+.clickable-row,
+.management-card {
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.clickable-card:hover,
+.clickable-row:hover,
+.management-card:hover,
+.metric-button:hover {
+  border-color: rgb(7 94 67 / 40%);
+}
+
+.clickable-card:hover,
+.management-card:hover {
+  box-shadow: 0 10px 26px rgb(20 20 20 / 8%);
+  transform: translateY(-1px);
+}
+
+.stat-card div,
+.help-strip div {
+  display: grid;
+  gap: 4px;
+}
+
+.stat-card strong {
+  font-size: 22px;
+}
+
+.jobs-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 330px minmax(0, 1fr);
+}
+
+.posting-list {
+  padding: 18px;
+}
+
+.posting-list-header {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.posting-list h2,
+.event-panel h2 {
+  font-size: 16px;
+  margin-bottom: 14px;
+}
+
+.posting-list-header h2 {
+  margin-bottom: 0;
+}
+
+.compact-filter {
+  display: grid;
+  gap: 6px;
+}
+
+.compact-filter span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.compact-filter select {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font: inherit;
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.posting-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-left: 3px solid transparent;
+  display: flex;
+  gap: 12px;
+  padding: 15px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.posting-item.active {
+  background: var(--green-soft);
+  border-color: var(--green);
+}
+
+.empty-state {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  display: grid;
+  gap: 6px;
+  padding: 18px;
+}
+
+.empty-state strong {
+  color: var(--ink);
+}
+
+.empty-state.inline {
+  margin-top: 18px;
+}
+
+.posting-item span:last-child,
+.applicant-row div,
+.event-main {
+  display: grid;
+  gap: 3px;
+}
+
+.job-detail {
+  padding: 22px;
+}
+
+.empty-detail {
+  color: var(--muted);
+  display: grid;
+  gap: 10px;
+  place-content: center;
+  text-align: center;
+}
+
+.empty-detail h2 {
+  color: var(--ink);
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 30px;
+}
+
+.ghost-button,
+.text-button {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.job-meta {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 24px 0;
+}
+
+.job-meta dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.job-meta dd {
+  font-weight: 800;
+  margin: 4px 0 0;
+}
+
+.pipeline {
+  background: var(--sand);
+  border-radius: 4px;
+  display: flex;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.pipeline span {
+  background: var(--green-soft);
+  border-right: 1px solid white;
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 800;
+  padding: 9px 10px;
+}
+
+.applicant-table {
+  display: grid;
+  gap: 10px;
+}
+
+.applicant-row {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 34px 1fr 140px 110px;
+  padding: 10px 0;
+}
+
+.resume {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.resume-link {
+  background: transparent;
+  border: 0;
+  color: var(--green);
+  font-weight: 800;
+  padding: 0;
+  text-align: left;
+}
+
+.resume-link:hover {
+  text-decoration: underline;
+}
+
+.required-note {
+  align-self: end;
+  background: var(--green-soft);
+  border: 1px solid rgb(7 94 67 / 22%);
+  border-radius: 4px;
+  display: grid;
+  gap: 4px;
+  min-height: 55px;
+  padding: 9px 10px;
+}
+
+.required-note strong {
+  color: var(--green);
+  font-size: 12px;
+}
+
+.required-note span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-chip {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 6px 10px;
+  text-align: center;
+}
+
+.status-chip.interviewing {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.status-chip.reviewed {
+  background: #fff6da;
+  color: #8b6500;
+}
+
+.status-chip.applied {
+  background: var(--sand);
+  color: var(--muted);
+}
+
+.analytics-row {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 1fr 120px;
+  margin-top: 26px;
+}
+
+.line-chart {
+  background:
+    linear-gradient(145deg, transparent 35%, rgb(7 94 67 / 20%) 36% 42%, transparent 43%),
+    var(--green-soft);
+  border-radius: 6px;
+  min-height: 108px;
+}
+
+.donut-chart {
+  align-items: center;
+  background: conic-gradient(var(--green) 0 74%, var(--green-soft) 74% 100%);
+  border-radius: 999px;
+  display: grid;
+  height: 112px;
+  justify-items: center;
+  padding: 24px;
+  position: relative;
+  width: 112px;
+}
+
+.donut-chart::before {
+  background: var(--paper);
+  border-radius: inherit;
+  content: "";
+  inset: 14px;
+  position: absolute;
+}
+
+.donut-chart strong,
+.donut-chart span {
+  position: relative;
+  z-index: 1;
+}
+
+.modal-backdrop {
+  align-items: flex-start;
+  background: rgb(17 25 26 / 45%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 32px 20px;
+  position: fixed;
+  z-index: 20;
+}
+
+.modal-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 64px);
+  max-width: 620px;
+  overflow-y: auto;
+  width: 100%;
+}
+
+.modal-card header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding: 24px 24px 0;
+}
+
+.modal-card form {
+  overflow-y: auto;
+  padding: 0 24px 24px;
+}
+
+.modal-card header p {
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.detail-backdrop {
+  align-items: center;
+}
+
+.detail-card {
+  max-width: 520px;
+}
+
+.all-events-card {
+  max-width: 760px;
+}
+
+.all-events-list {
+  display: grid;
+  gap: 10px;
+  overflow-y: auto;
+  padding: 0 24px 24px;
+}
+
+.all-event-row {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: inherit;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 96px 1fr 150px;
+  padding: 14px;
+  text-align: left;
+}
+
+.all-event-row:hover {
+  background: var(--green-soft);
+  border-color: rgb(7 94 67 / 30%);
+}
+
+.all-event-row div {
+  display: grid;
+  gap: 4px;
+}
+
+.all-event-row > span:last-child {
+  color: var(--muted);
+  font-weight: 800;
+  text-align: right;
+}
+
+.all-events-empty {
+  margin: 0 24px 24px;
+}
+
+.detail-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.detail-list div {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 160px 1fr;
+  padding: 12px 0 0;
+}
+
+.detail-list dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.detail-list dd {
+  font-weight: 800;
+  margin: 0;
+}
+
+.detail-actions {
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.weather-panel {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+  padding-top: 18px;
+}
+
+.weather-panel header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 0;
+}
+
+.weather-panel h3,
+.weather-panel h4 {
+  margin: 0;
+}
+
+.weather-badge {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 7px 10px;
+}
+
+.weather-badge.safe {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.weather-badge.caution {
+  background: #fff6da;
+  color: #8b6500;
+}
+
+.weather-badge.move {
+  background: #eef2ff;
+  color: #3347a1;
+}
+
+.weather-badge.cancel {
+  background: #fff0ed;
+  color: #9b2c1f;
+}
+
+.weather-score {
+  align-items: center;
+  background: var(--sand);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+}
+
+.weather-score strong {
+  font-size: 34px;
+  line-height: 1;
+}
+
+.weather-score span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.weather-columns {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.weather-columns ul {
+  color: var(--muted);
+  display: grid;
+  gap: 8px;
+  line-height: 1.5;
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.attendee-panel {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  padding-top: 18px;
+}
+
+.attendee-panel header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  padding: 0;
+}
+
+.attendee-panel h3 {
+  margin: 0;
+}
+
+.attendee-count {
+  background: var(--green-soft);
+  border-radius: 999px;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 900;
+  min-width: 34px;
+  padding: 7px 10px;
+  text-align: center;
+}
+
+.attendee-form {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr auto;
+}
+
+.attendee-form input {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font: inherit;
+  min-height: 38px;
+  padding: 0 12px;
+}
+
+.attendee-list {
+  display: grid;
+  gap: 8px;
+}
+
+.attendee-row {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr auto;
+  padding: 10px 12px;
+}
+
+.attendee-row div {
+  display: grid;
+  gap: 3px;
+}
+
+.attendee-row small,
+.attendee-row span,
+.attendee-empty {
+  color: var(--muted);
+}
+
+.attendee-row span {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.modal-actions {
+  align-items: center;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+  bottom: 0;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin: 18px -24px -24px;
+  padding: 16px 24px;
+  position: sticky;
+}
+
+.not-found-panel {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: clamp(30px, 6vw, 72px);
+}
+
+.not-found-panel h1 {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: clamp(42px, 7vw, 82px);
+  line-height: 0.95;
+}
+
+.not-found-panel p:last-child {
+  color: var(--muted);
+  line-height: 1.7;
+  margin-top: 18px;
+  max-width: 560px;
+}
+
+.events-title {
+  margin-bottom: 22px;
+}
+
+.event-panel {
+  margin-bottom: 18px;
+  padding: 20px;
+}
+
+.event-list {
+  border-top: 1px solid var(--line);
+}
+
+.event-row {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 34px 1fr 150px 20px;
+  padding: 18px 0;
+}
+
+.event-date {
+  display: grid;
+  gap: 4px;
+  text-align: right;
+}
+
+.chevron {
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.management-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.management-grid article,
+.management-card {
+  align-items: center;
+  background: var(--sand);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  min-height: 120px;
+  padding: 18px;
+  text-align: center;
+}
+
+.help-strip {
+  align-items: center;
+  color: inherit;
+  display: flex;
+  gap: 12px;
+  padding: 18px 20px;
+  text-align: left;
+  width: 100%;
+}
+
+@media (max-width: 900px) {
+  .signup-card,
+  .jobs-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-panel {
+    min-height: auto;
+  }
+
+  .portal-header {
+    grid-template-columns: 1fr;
+    justify-items: start;
+    padding-bottom: 12px;
+    padding-top: 12px;
+    position: static;
+  }
+
+  .portal-nav {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .account-menu {
+    justify-self: start;
+  }
+
+  .stat-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .desktop-only {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .signup-wrap {
+    padding: 16px;
+  }
+
+  .account-form,
+  .content-band,
+  .hero-band {
+    padding: 28px 22px;
+  }
+
+  .form-grid,
+  .address-grid,
+  .stat-grid,
+  .job-meta,
+  .analytics-row,
+  .management-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-panel h1,
+  .hero-band h1 {
+    font-size: 36px;
+  }
+
+  .metric-row {
+    gap: 24px;
+  }
+
+  .dashboard-header,
+  .events-title,
+  .event-panel header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .applicant-row,
+  .event-row {
+    grid-template-columns: 34px 1fr;
+  }
+
+  .resume,
+  .status-chip,
+  .event-date,
+  .chevron {
+    grid-column: 2;
+    text-align: left;
+  }
+
+  .modal-backdrop {
+    padding: 16px;
+  }
+
+  .modal-card {
+    max-height: calc(100vh - 32px);
+  }
+
+  .detail-list div {
+    grid-template-columns: 1fr;
+  }
+
+  .weather-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .attendee-form,
+  .attendee-row {
+    grid-template-columns: 1fr;
+  }
+
+  .all-event-row {
+    grid-template-columns: 1fr;
+  }
+
+  .all-event-row > span:last-child {
+    text-align: left;
+  }
+}

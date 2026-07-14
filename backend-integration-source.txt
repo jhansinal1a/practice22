@@ -1,0 +1,914 @@
+﻿================ EXISTING FRONTEND API ================
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
+const TOKEN_STORAGE_KEY = "waypoint.employer.jwt";
+
+export type EmployerRegistrationPayload = {
+  companyName: string;
+  industry: string;
+  companySize: string;
+  founded?: string;
+  firstName: string;
+  lastName: string;
+  workEmail: string;
+  phone: string;
+  password: string;
+  city: string;
+  streetAddress?: string;
+  zipCode: string;
+  careersContactEmail?: string;
+  website?: string;
+  aboutCompany?: string;
+  hiringAreas: string[];
+};
+
+export type JobPostingPayload = {
+  jobId: string;
+  title: string;
+  workType: string;
+  location: string;
+  employmentType: string;
+  experienceLevel?: string;
+  salaryMin?: number;
+  salaryMax?: number;
+  requiredSkills: string[];
+  description: string;
+  applicationDeadline?: string;
+  resumeRequired: boolean;
+};
+
+export type JobPostingResponse = JobPostingPayload & {
+  id: string;
+  status: "Published";
+  applicantCount: number;
+  reviewedCount: number;
+  interviewingCount: number;
+  createdAt: string;
+};
+
+export type AuthResponse = {
+  tokenType: "Bearer";
+  accessToken: string;
+  employer: {
+    id: string;
+    companyName: string;
+    workEmail: string;
+    contactName: string;
+    city: string;
+  };
+};
+
+export function getStoredToken() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.localStorage.getItem(TOKEN_STORAGE_KEY);
+}
+
+export function storeToken(token: string) {
+  window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+}
+
+export async function registerEmployer(payload: EmployerRegistrationPayload) {
+  const response = await request<AuthResponse>("/api/auth/employer/register", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  storeToken(response.accessToken);
+  return response;
+}
+
+export async function createJobPosting(payload: JobPostingPayload) {
+  return request("/api/employer/jobs", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    authenticated: true,
+  });
+}
+
+export async function listJobPostings(timePostedDays?: 1 | 3 | 7 | 14 | 30) {
+  const query = timePostedDays ? `?timePostedDays=${timePostedDays}` : "";
+  return request<JobPostingResponse[]>(`/api/employer/jobs${query}`, {
+    authenticated: true,
+  });
+}
+
+async function request<T>(
+  path: string,
+  options: RequestInit & { authenticated?: boolean } = {},
+): Promise<T> {
+  const headers = new Headers(options.headers);
+  headers.set("Content-Type", "application/json");
+
+  if (options.authenticated) {
+    const token = getStoredToken();
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new Error(error?.message ?? `Request failed with ${response.status}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+================ NEXT CONFIG ================
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+};
+
+export default nextConfig;
+
+================ SERVER.JS ================
+require("dotenv").config();
+
+const express = require("express");
+const cors = require("cors");
+const path = require("path");
+const mongoose = require("mongoose");
+const connectDB = require("./db");
+
+const employeeRoutes = require("./routes/employees");
+const employerRoutes = require("./routes/employers");
+const jobRoutes = require("./routes/jobs");
+const applicationRoutes = require("./routes/applications");
+const eventRoutes = require("./routes/events");
+const invitationRoutes = require("./routes/invitations");
+const contactRoutes = require("./routes/contact");
+const uploadRoutes = require("./routes/uploads");
+
+const app = express();
+const PORT = Number(process.env.PORT) || 3001;
+
+app.use(cors());
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+// Existing frontend files stay inside the project's public folder.
+app.use(express.static(path.join(__dirname, "public")));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+app.get("/api/health", (req, res) => {
+  const states = ["disconnected", "connected", "connecting", "disconnecting"];
+  res.json({
+    status: "ok",
+    message: "Waypoint Portal backend is running",
+    database: states[mongoose.connection.readyState] || "unknown",
+  });
+});
+
+app.use("/api/employees", employeeRoutes);
+app.use("/api/employers", employerRoutes);
+app.use("/api/jobs", jobRoutes);
+app.use("/api/applications", applicationRoutes);
+app.use("/api/events", eventRoutes);
+app.use("/api/invitations", invitationRoutes);
+app.use("/api/invite", invitationRoutes); // Compatibility with an existing Invite Team button.
+app.use("/api/contact", contactRoutes);
+app.use("/api/uploads", uploadRoutes);
+
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/")) {
+    return res.status(404).json({ message: "API route not found" });
+  }
+  next();
+});
+
+app.use((error, req, res, next) => {
+  console.error(error);
+
+  if (error.code === 11000) {
+    return res.status(409).json({
+      message: "A record with that unique value already exists.",
+      fields: error.keyValue,
+    });
+  }
+
+  if (error.name === "ValidationError") {
+    return res.status(400).json({
+      message: "Validation failed",
+      errors: Object.values(error.errors).map((item) => item.message),
+    });
+  }
+
+  res.status(error.status || 500).json({
+    message: error.message || "Internal server error",
+  });
+});
+
+async function startServer() {
+  try {
+    await connectDB();
+    app.listen(PORT, () => {
+      console.log(`Waypoint Portal running at http://localhost:${PORT}`);
+      console.log(`Health check: http://localhost:${PORT}/api/health`);
+    });
+  } catch (error) {
+    console.error("Unable to start the server:", error.message);
+    process.exit(1);
+  }
+}
+
+startServer();
+
+================ DB.JS ================
+const mongoose = require("mongoose");
+
+async function connectDB() {
+  const uri = process.env.MONGODB_URI;
+
+  if (!uri) {
+    throw new Error("MONGODB_URI is missing from the .env file.");
+  }
+
+  const connection = await mongoose.connect(uri, {
+    dbName: "waypoint_portal",
+    serverSelectionTimeoutMS: 15000,
+  });
+
+  console.log(
+    `MongoDB Atlas connected: ${connection.connection.name}`
+  );
+
+  return connection;
+}
+
+module.exports = connectDB;
+
+================ PACKAGE.JSON ================
+{
+  "name": "waypoint-employer-portal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Waypoint employee and employer portal backend using Express and MongoDB Atlas",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "mongoose": "^8.10.0",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^6.10.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
+
+================ MODEL: Application.js ================
+const mongoose = require("mongoose");
+
+const applicationSchema = new mongoose.Schema(
+  {
+    job: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: true },
+    employee: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null },
+    applicantName: { type: String, required: true, trim: true },
+    applicantEmail: { type: String, required: true, lowercase: true, trim: true },
+    phone: { type: String, default: "" },
+    resumeUrl: { type: String, default: "" },
+    coverLetter: { type: String, default: "" },
+    status: {
+      type: String,
+      enum: ["Applied", "Under Review", "Shortlisted", "Interview", "Selected", "Rejected"],
+      default: "Applied",
+    },
+  },
+  { timestamps: true }
+);
+
+applicationSchema.index({ job: 1, applicantEmail: 1 }, { unique: true });
+
+module.exports = mongoose.model("Application", applicationSchema);
+
+================ MODEL: ContactMessage.js ================
+const mongoose = require("mongoose");
+
+const contactMessageSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    email: { type: String, required: true, lowercase: true, trim: true },
+    message: { type: String, required: true, trim: true },
+  },
+  { timestamps: true }
+);
+
+module.exports = mongoose.model("ContactMessage", contactMessageSchema);
+
+================ MODEL: Employee.js ================
+const mongoose = require("mongoose");
+
+const employeeSchema = new mongoose.Schema(
+  {
+    fullName: { type: String, required: true, trim: true },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    phone: { type: String, trim: true, default: "" },
+    location: { type: String, trim: true, default: "" },
+    skills: [{ type: String, trim: true }],
+    experience: { type: String, default: "" },
+    education: { type: String, default: "" },
+    resumeUrl: { type: String, default: "" },
+    profileSummary: { type: String, default: "" },
+  },
+  { timestamps: true }
+);
+
+module.exports = mongoose.model("Employee", employeeSchema);
+
+================ MODEL: Employer.js ================
+const mongoose = require("mongoose");
+
+const teamMemberSchema = new mongoose.Schema(
+  {
+    name: { type: String, trim: true, default: "" },
+    email: { type: String, lowercase: true, trim: true, required: true },
+    role: { type: String, trim: true, default: "Member" },
+    status: { type: String, enum: ["Invited", "Active", "Inactive"], default: "Invited" },
+  },
+  { _id: false }
+);
+
+const employerSchema = new mongoose.Schema(
+  {
+    companyName: { type: String, required: true, trim: true },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    phone: { type: String, trim: true, default: "" },
+    industry: { type: String, trim: true, default: "" },
+    location: { type: String, trim: true, default: "" },
+    website: { type: String, trim: true, default: "" },
+    description: { type: String, default: "" },
+    logoUrl: { type: String, default: "" },
+    teamMembers: [teamMemberSchema],
+  },
+  { timestamps: true }
+);
+
+module.exports = mongoose.model("Employer", employerSchema);
+
+================ MODEL: Event.js ================
+const mongoose = require("mongoose");
+
+const eventSchema = new mongoose.Schema(
+  {
+    eventName: { type: String, required: true, trim: true },
+    eventType: { type: String, trim: true, default: "Others" },
+    dateFrom: { type: Date, required: true },
+    dateTo: { type: Date, required: true },
+    timeFrom: { type: String, required: true },
+    timeTo: { type: String, required: true },
+    eventMode: { type: String, enum: ["In Person", "Online"], default: "In Person" },
+    location: { type: String, default: "" },
+    meetingLink: { type: String, default: "" },
+    description: { type: String, default: "" },
+    employer: { type: mongoose.Schema.Types.ObjectId, ref: "Employer", default: null },
+  },
+  { timestamps: true }
+);
+
+module.exports = mongoose.model("Event", eventSchema);
+
+================ MODEL: Invitation.js ================
+const mongoose = require("mongoose");
+
+const invitationSchema = new mongoose.Schema(
+  {
+    email: { type: String, required: true, lowercase: true, trim: true },
+    name: { type: String, default: "" },
+    role: { type: String, default: "Team Member" },
+    token: { type: String, required: true, unique: true },
+    status: { type: String, enum: ["Pending", "Accepted", "Expired", "Cancelled"], default: "Pending" },
+    expiresAt: { type: Date, required: true },
+  },
+  { timestamps: true }
+);
+
+module.exports = mongoose.model("Invitation", invitationSchema);
+
+================ MODEL: Job.js ================
+const mongoose = require("mongoose");
+
+function createJobId() {
+  return `JOB-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+const jobSchema = new mongoose.Schema(
+  {
+    jobId: { type: String, unique: true, default: createJobId },
+    title: { type: String, required: true, trim: true },
+    description: { type: String, required: true },
+    location: { type: String, trim: true, default: "" },
+    workType: { type: String, enum: ["Onsite", "Remote", "Hybrid"], default: "Onsite" },
+    employmentType: {
+      type: String,
+      enum: ["Full-time", "Part-time", "Contract", "Internship", "Temporary"],
+      default: "Full-time",
+    },
+    salary: { type: String, default: "" },
+    requiredSkills: [{ type: String, trim: true }],
+    applicationDeadline: { type: Date, default: null },
+    status: { type: String, enum: ["Draft", "Open", "Closed"], default: "Open" },
+    employer: { type: mongoose.Schema.Types.ObjectId, ref: "Employer", default: null },
+  },
+  { timestamps: true }
+);
+
+module.exports = mongoose.model("Job", jobSchema);
+
+================ ROUTE: applications.js ================
+const express = require("express");
+const Application = require("../models/Application");
+
+const router = express.Router();
+
+router.post("/", async (req, res, next) => {
+  try {
+    const application = await Application.create(req.body);
+    const populated = await application.populate([
+      { path: "job", select: "jobId title" },
+      { path: "employee", select: "fullName email" },
+    ]);
+    res.status(201).json(populated);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/", async (req, res, next) => {
+  try {
+    const filter = {};
+    if (req.query.job) filter.job = req.query.job;
+    if (req.query.employee) filter.employee = req.query.employee;
+    if (req.query.status) filter.status = req.query.status;
+
+    const applications = await Application.find(filter)
+      .populate("job", "jobId title employer")
+      .populate("employee", "fullName email")
+      .sort({ createdAt: -1 });
+
+    res.json(applications);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/:id", async (req, res, next) => {
+  try {
+    const application = await Application.findById(req.params.id)
+      .populate("job", "jobId title employer")
+      .populate("employee", "fullName email");
+    if (!application) return res.status(404).json({ message: "Application not found" });
+    res.json(application);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch("/:id/status", async (req, res, next) => {
+  try {
+    const application = await Application.findByIdAndUpdate(
+      req.params.id,
+      { status: req.body.status },
+      { new: true, runValidators: true }
+    );
+    if (!application) return res.status(404).json({ message: "Application not found" });
+    res.json(application);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete("/:id", async (req, res, next) => {
+  try {
+    const application = await Application.findByIdAndDelete(req.params.id);
+    if (!application) return res.status(404).json({ message: "Application not found" });
+    res.json({ message: "Application deleted" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+module.exports = router;
+
+================ ROUTE: contact.js ================
+const express = require("express");
+const ContactMessage = require("../models/ContactMessage");
+
+const router = express.Router();
+
+router.post("/", async (req, res, next) => {
+  try {
+    const message = await ContactMessage.create(req.body);
+    res.status(201).json(message);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/", async (req, res, next) => {
+  try {
+    const messages = await ContactMessage.find().sort({ createdAt: -1 });
+    res.json(messages);
+  } catch (error) {
+    next(error);
+  }
+});
+
+module.exports = router;
+
+================ ROUTE: employees.js ================
+const express = require("express");
+const Employee = require("../models/Employee");
+
+const router = express.Router();
+
+router.post("/", async (req, res, next) => {
+  try {
+    const employee = await Employee.create(req.body);
+    res.status(201).json(employee);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/", async (req, res, next) => {
+  try {
+    const employees = await Employee.find().sort({ createdAt: -1 });
+    res.json(employees);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/:id", async (req, res, next) => {
+  try {
+    const employee = await Employee.findById(req.params.id);
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
+    res.json(employee);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put("/:id", async (req, res, next) => {
+  try {
+    const employee = await Employee.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
+    res.json(employee);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete("/:id", async (req, res, next) => {
+  try {
+    const employee = await Employee.findByIdAndDelete(req.params.id);
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
+    res.json({ message: "Employee deleted" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+module.exports = router;
+
+================ ROUTE: employers.js ================
+const express = require("express");
+const Employer = require("../models/Employer");
+
+const router = express.Router();
+
+router.post("/", async (req, res, next) => {
+  try {
+    const employer = await Employer.create(req.body);
+    res.status(201).json(employer);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/", async (req, res, next) => {
+  try {
+    const employers = await Employer.find().sort({ createdAt: -1 });
+    res.json(employers);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/:id", async (req, res, next) => {
+  try {
+    const employer = await Employer.findById(req.params.id);
+    if (!employer) return res.status(404).json({ message: "Employer not found" });
+    res.json(employer);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put("/:id", async (req, res, next) => {
+  try {
+    const employer = await Employer.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+    if (!employer) return res.status(404).json({ message: "Employer not found" });
+    res.json(employer);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete("/:id", async (req, res, next) => {
+  try {
+    const employer = await Employer.findByIdAndDelete(req.params.id);
+    if (!employer) return res.status(404).json({ message: "Employer not found" });
+    res.json({ message: "Employer deleted" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+module.exports = router;
+
+================ ROUTE: events.js ================
+const express = require("express");
+const Event = require("../models/Event");
+
+const router = express.Router();
+
+router.post("/", async (req, res, next) => {
+  try {
+    const event = await Event.create(req.body);
+    res.status(201).json(event);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/", async (req, res, next) => {
+  try {
+    const filter = req.query.employer ? { employer: req.query.employer } : {};
+    const events = await Event.find(filter).populate("employer", "companyName").sort({ dateFrom: 1 });
+    res.json(events);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/:id", async (req, res, next) => {
+  try {
+    const event = await Event.findById(req.params.id).populate("employer", "companyName");
+    if (!event) return res.status(404).json({ message: "Event not found" });
+    res.json(event);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put("/:id", async (req, res, next) => {
+  try {
+    const event = await Event.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+    if (!event) return res.status(404).json({ message: "Event not found" });
+    res.json(event);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete("/:id", async (req, res, next) => {
+  try {
+    const event = await Event.findByIdAndDelete(req.params.id);
+    if (!event) return res.status(404).json({ message: "Event not found" });
+    res.json({ message: "Event deleted" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+module.exports = router;
+
+================ ROUTE: invitations.js ================
+const express = require("express");
+const crypto = require("crypto");
+const nodemailer = require("nodemailer");
+const Invitation = require("../models/Invitation");
+
+const router = express.Router();
+
+function createTransporter() {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) return null;
+
+  return nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_APP_PASSWORD,
+    },
+  });
+}
+
+router.post("/", async (req, res, next) => {
+  try {
+    const { email, role = "Team Member", name = "" } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    const invitation = await Invitation.create({ email, role, name, token, expiresAt });
+    const baseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 3001}`;
+    const invitationUrl = `${baseUrl}/accept-invitation.html?token=${token}`;
+
+    const transporter = createTransporter();
+    let emailSent = false;
+
+    if (transporter) {
+      await transporter.sendMail({
+        from: `Waypoint Portal <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: "You are invited to join the Waypoint team",
+        text: `Hello ${name || "there"},\n\nYou were invited as ${role}.\nOpen this link to accept: ${invitationUrl}\n\nThis invitation expires in 7 days.`,
+        html: `
+          <h2>Waypoint Team Invitation</h2>
+          <p>Hello ${name || "there"},</p>
+          <p>You were invited to join the Waypoint team as <strong>${role}</strong>.</p>
+          <p><a href="${invitationUrl}">Accept invitation</a></p>
+          <p>This invitation expires in 7 days.</p>
+        `,
+      });
+      emailSent = true;
+    }
+
+    res.status(201).json({
+      message: emailSent
+        ? "Invitation saved and email sent"
+        : "Invitation saved, but email was not sent because email settings are missing",
+      invitation,
+      emailSent,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/", async (req, res, next) => {
+  try {
+    const invitations = await Invitation.find().sort({ createdAt: -1 });
+    res.json(invitations);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/accept/:token", async (req, res, next) => {
+  try {
+    const invitation = await Invitation.findOne({ token: req.params.token });
+    if (!invitation) return res.status(404).json({ message: "Invitation not found" });
+
+    if (invitation.expiresAt < new Date()) {
+      invitation.status = "Expired";
+      await invitation.save();
+      return res.status(410).json({ message: "Invitation has expired" });
+    }
+
+    invitation.status = "Accepted";
+    await invitation.save();
+    res.json({ message: "Invitation accepted", invitation });
+  } catch (error) {
+    next(error);
+  }
+});
+
+module.exports = router;
+
+================ ROUTE: jobs.js ================
+const express = require("express");
+const Job = require("../models/Job");
+
+const router = express.Router();
+
+router.post("/", async (req, res, next) => {
+  try {
+    const job = await Job.create(req.body);
+    res.status(201).json(job);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/", async (req, res, next) => {
+  try {
+    const filter = {};
+    if (req.query.status) filter.status = req.query.status;
+    if (req.query.employer) filter.employer = req.query.employer;
+    const jobs = await Job.find(filter).populate("employer", "companyName email").sort({ createdAt: -1 });
+    res.json(jobs);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/:id", async (req, res, next) => {
+  try {
+    const job = await Job.findById(req.params.id).populate("employer", "companyName email");
+    if (!job) return res.status(404).json({ message: "Job not found" });
+    res.json(job);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put("/:id", async (req, res, next) => {
+  try {
+    const job = await Job.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+    if (!job) return res.status(404).json({ message: "Job not found" });
+    res.json(job);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete("/:id", async (req, res, next) => {
+  try {
+    const job = await Job.findByIdAndDelete(req.params.id);
+    if (!job) return res.status(404).json({ message: "Job not found" });
+    res.json({ message: "Job deleted" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+module.exports = router;
+
+================ ROUTE: uploads.js ================
+const express = require("express");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+
+const router = express.Router();
+const uploadDirectory = path.join(__dirname, "..", "uploads", "resumes");
+fs.mkdirSync(uploadDirectory, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (req, file, callback) => callback(null, uploadDirectory),
+  filename: (req, file, callback) => {
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    callback(null, `${Date.now()}-${safeName}`);
+  },
+});
+
+const allowedMimeTypes = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, callback) => {
+    if (allowedMimeTypes.has(file.mimetype)) return callback(null, true);
+    const error = new Error("Only PDF, DOC, and DOCX resume files are allowed");
+    error.status = 400;
+    callback(error);
+  },
+});
+
+router.post("/resume", upload.single("resume"), (req, res) => {
+  if (!req.file) return res.status(400).json({ message: "Resume file is required" });
+
+  const baseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 3001}`;
+  res.status(201).json({
+    message: "Resume uploaded",
+    filename: req.file.filename,
+    fileUrl: `${baseUrl}/uploads/resumes/${req.file.filename}`,
+  });
+});
+
+module.exports = router;
