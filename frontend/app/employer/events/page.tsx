@@ -25,6 +25,7 @@ type ScheduledEvent = {
   weather: WeatherInputs;
   weatherSource?: string;
   attendees: Attendee[];
+  changeNotification?: EventChangeNotification;
 };
 
 type Attendee = {
@@ -32,6 +33,14 @@ type Attendee = {
   name: string;
   email: string;
   registeredAt: string;
+  lastNotifiedAt?: string;
+  notificationStatus?: "Sent";
+};
+
+type EventChangeNotification = {
+  sentAt: string;
+  recipientCount: number;
+  changedFields: string[];
 };
 
 export default function EventsPage() {
@@ -54,7 +63,12 @@ export default function EventsPage() {
       }
 
       const next = [...current];
-      next[existingIndex] = normalizeEvent(event);
+      const existingEvent = normalizeEvent(current[existingIndex]);
+      const changedFields = getChangedEventFields(existingEvent, event);
+      next[existingIndex] =
+        changedFields.length > 0
+          ? notifyRegisteredAttendees(normalizeEvent(event), changedFields)
+          : normalizeEvent(event);
       return next;
     });
     setEditingEvent(null);
@@ -300,6 +314,7 @@ function EventDetailDialog({
 }) {
   const assessment = getWeatherAssessment(event);
   const attendees = getAttendees(event);
+  const notification = event.changeNotification;
 
   function handleRegisterSubmit(registerEvent: FormEvent<HTMLFormElement>) {
     registerEvent.preventDefault();
@@ -342,6 +357,12 @@ function EventDetailDialog({
               { label: "Duration", value: event.durationHours ? `${event.durationHours} hours` : "Not provided" },
             { label: "Weather Source", value: event.weatherSource ?? "Google weather not fetched" },
             { label: "Registered", value: attendees.length },
+            {
+              label: "Notifications",
+              value: notification
+                ? `${notification.recipientCount} attendee${notification.recipientCount === 1 ? "" : "s"} notified on ${formatNotificationTime(notification.sentAt)}`
+                : "No event change notifications sent",
+            },
             { label: "Description", value: event.description || "Not provided" },
           ].map((item) => (
             <div key={item.label}>
@@ -383,6 +404,15 @@ function EventDetailDialog({
             <h3>Registered attendees</h3>
             <span className="attendee-count">{attendees.length}</span>
           </header>
+          {notification ? (
+            <div className="notification-summary">
+              <strong>Event update sent</strong>
+              <span>
+                Changes sent to {notification.recipientCount} registered attendee{notification.recipientCount === 1 ? "" : "s"}.
+                Updated fields: {notification.changedFields.join(", ")}.
+              </span>
+            </div>
+          ) : null}
           <form className="attendee-form" onSubmit={handleRegisterSubmit}>
             <input name="attendeeName" placeholder="Attendee name" required />
             <input name="attendeeEmail" placeholder="Email address" required type="email" />
@@ -397,8 +427,11 @@ function EventDetailDialog({
                   <div>
                     <strong>{attendee.name}</strong>
                     <small>{attendee.email}</small>
+                    {attendee.lastNotifiedAt ? (
+                      <small>Notification sent {formatNotificationTime(attendee.lastNotifiedAt)}</small>
+                    ) : null}
                   </div>
-                  <span>{attendee.registeredAt}</span>
+                  <span>{attendee.notificationStatus ?? attendee.registeredAt}</span>
                 </div>
               ))}
             </div>
@@ -631,4 +664,64 @@ function normalizeEvent(event: ScheduledEvent): ScheduledEvent {
 
 function getAttendees(event: Partial<ScheduledEvent>): Attendee[] {
   return Array.isArray(event.attendees) ? event.attendees : [];
+}
+
+function getChangedEventFields(previous: ScheduledEvent, next: ScheduledEvent) {
+  const trackedFields: Array<{ key: keyof ScheduledEvent; label: string }> = [
+    { key: "title", label: "Event title" },
+    { key: "eventType", label: "Event type" },
+    { key: "eventMode", label: "Event mode" },
+    { key: "location", label: "Location" },
+    { key: "startsOn", label: "Start date" },
+    { key: "endsOn", label: "End date" },
+    { key: "capacity", label: "Capacity" },
+    { key: "durationHours", label: "Duration" },
+    { key: "description", label: "Description" },
+  ];
+
+  return trackedFields
+    .filter(({ key }) => String(previous[key] ?? "") !== String(next[key] ?? ""))
+    .map(({ label }) => label);
+}
+
+function notifyRegisteredAttendees(event: ScheduledEvent, changedFields: string[]): ScheduledEvent {
+  const attendees = getAttendees(event);
+  if (attendees.length === 0) {
+    return {
+      ...event,
+      attendees,
+      changeNotification: undefined,
+    };
+  }
+
+  const sentAt = new Date().toISOString();
+
+  // Backend integration required: call notification service here to send email/SMS/push updates to registered attendees.
+  return {
+    ...event,
+    attendees: attendees.map((attendee) => ({
+      ...attendee,
+      lastNotifiedAt: sentAt,
+      notificationStatus: "Sent",
+    })),
+    changeNotification: {
+      sentAt,
+      recipientCount: attendees.length,
+      changedFields,
+    },
+  };
+}
+
+function formatNotificationTime(sentAt: string) {
+  const date = new Date(sentAt);
+  if (Number.isNaN(date.getTime())) {
+    return "recently";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }

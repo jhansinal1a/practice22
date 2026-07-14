@@ -357,6 +357,93 @@ textarea {
   font-weight: 800;
 }
 
+.account-reference-page {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  padding: 30px;
+}
+
+.account-reference-card {
+  grid-template-columns: 320px minmax(0, 1fr);
+  max-width: 1060px;
+}
+
+.account-reference-brand {
+  min-height: 1320px;
+  padding: 42px 40px;
+}
+
+.account-reference-brand h1 {
+  font-size: 28px;
+  line-height: 1.12;
+  margin-top: 48px;
+  max-width: 260px;
+}
+
+.account-reference-brand .proof-list {
+  margin-top: 36px;
+}
+
+.account-reference-brand p {
+  font-size: 14px;
+  margin-top: 10px;
+  max-width: 260px;
+}
+
+.account-reference-form {
+  padding: 44px 50px 58px;
+}
+
+.account-reference-form header p {
+  margin-top: 6px;
+}
+
+.account-reference-form fieldset {
+  margin-top: 22px;
+  padding-top: 14px;
+}
+
+.account-reference-form legend {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.account-reference-form .role-toggle {
+  margin-bottom: 24px;
+  max-width: none;
+}
+
+.account-reference-form .form-grid {
+  gap: 14px 16px;
+}
+
+.account-address-grid {
+  grid-template-columns: 1fr 120px 1.4fr;
+}
+
+.account-address-grid .field:last-child {
+  grid-column: 3;
+}
+
+.careers-grid {
+  align-items: start;
+  grid-template-columns: 1fr 160px;
+}
+
+.careers-grid .textarea-field {
+  grid-column: 1 / -1;
+}
+
+.careers-grid textarea {
+  min-height: 90px;
+}
+
+.create-account-submit {
+  margin-top: 28px;
+}
+
 .portal-page {
   background: var(--canvas);
   min-height: 100vh;
@@ -1156,6 +1243,21 @@ textarea {
   text-align: center;
 }
 
+.notification-summary {
+  background: var(--green-soft);
+  border: 1px solid rgb(7 94 67 / 16%);
+  border-radius: 8px;
+  color: var(--green);
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.notification-summary span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .attendee-form {
   display: grid;
   gap: 10px;
@@ -1309,6 +1411,14 @@ textarea {
     min-height: auto;
   }
 
+  .account-reference-card {
+    grid-template-columns: 1fr;
+  }
+
+  .account-reference-brand {
+    min-height: auto;
+  }
+
   .portal-header {
     grid-template-columns: 1fr;
     justify-items: start;
@@ -1348,6 +1458,8 @@ textarea {
 
   .form-grid,
   .address-grid,
+  .account-address-grid,
+  .careers-grid,
   .stat-grid,
   .job-meta,
   .analytics-row,
@@ -1394,6 +1506,10 @@ textarea {
 
   .detail-list div {
     grid-template-columns: 1fr;
+  }
+
+  .account-address-grid .field:last-child {
+    grid-column: auto;
   }
 
   .weather-columns {
